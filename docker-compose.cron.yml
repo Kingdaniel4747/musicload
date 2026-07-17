@@ -1,0 +1,103 @@
+# Docker Compose configuration for Musicload Cron
+#
+# This docker-compose file runs the Musicload cron service for automatic
+# playlist synchronization based on schedules defined in cron.yaml.
+
+services:
+  # Musicload cron service - monitors and syncs playlists
+  musicload-cron:
+    build:
+      context: .
+      args:
+        # Match host user UID/GID for volume permissions (default: 1000)
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+    container_name: musicload-cron
+    command: ["uv", "run", "musicload", "cron", "--config", "/config/cron.yaml"]
+
+    volumes:
+      # Mount downloads directory (contains audio files and state)
+      - ./downloads:/downloads
+
+      # Mount cron configuration file (read-only)
+      - ./cron.yaml:/config/cron.yaml:ro
+
+    environment:
+      # Download directory inside container
+      - MUSICLOAD_DOWNLOAD_DIR=/downloads
+
+      # Audio format (opus, mp3, or flac)
+      - MUSICLOAD_AUDIO_FORMAT=opus
+
+      # Optional: Filename template
+      # - MUSICLOAD_FILENAME_TEMPLATE=%(artist,uploader)s - %(title)s
+
+      # Optional: ReplayGain/R128 loudness normalization tags
+      # - MUSICLOAD_REPLAYGAIN=true
+      #
+      # Optional: Change data dir where all the configs/caches are saved
+      # - MUSICLOAD_DATA_DIR=/downloads
+
+      # Optional: Gotify notifications
+      # - GOTIFY_URL=  # Gotify server URL
+      # - GOTIFY_TOKEN=  # Gotify app token
+
+      # Optional: Navidrome protection (prevent deletion of starred/favorited songs)
+      # - NAVIDROME_URL=  # Navidrome server URL (e.g., https://music.example.com)
+      # - NAVIDROME_USER=  # Navidrome username
+      # - NAVIDROME_PASSWORD=  # Navidrome password
+      # - NAVIDROME_KEEP_PLAYLIST=keep  # Playlist name for protection (default: keep)
+
+    restart: unless-stopped
+
+    # Optional: Health check
+    # healthcheck:
+    #   test: ["CMD", "test", "-d", "/downloads/.musicload/state"]
+    #   interval: 5m
+    #   timeout: 10s
+    #   retries: 3
+
+  # Optional: Run web UI alongside cron service
+  # Uncomment the section below to enable the web interface
+
+  # musicload-web:
+  #   build:
+  #     context: .
+  #     args:
+  #       UID: ${UID:-1000}
+  #       GID: ${GID:-1000}
+  #   user: "${UID:-1000}:${GID:-1000}"
+  #   container_name: musicload-web
+  #   command: ["uv", "run", "musicload", "web", "--host", "0.0.0.0", "--port", "8000"]
+  #
+  #   ports:
+  #     - "8000:8000"
+  #
+  #   volumes:
+  #     - ./downloads:/downloads
+  #
+  #   environment:
+  #     - MUSICLOAD_DOWNLOAD_DIR=/downloads
+  #     - MUSICLOAD_AUDIO_FORMAT=opus
+  #     - MUSICLOAD_WEB_PORT=8000
+  #     # - GOTIFY_URL=  # Optional: Gotify server URL
+  #     # - GOTIFY_TOKEN=  # Optional: Gotify app token
+  #     # - NAVIDROME_URL=  # Optional: Navidrome server URL
+  #     # - NAVIDROME_USER=  # Optional: Navidrome username
+  #     # - NAVIDROME_PASSWORD=  # Optional: Navidrome password
+  #     # - NAVIDROME_KEEP_PLAYLIST=keep  # Optional: Playlist name for protection
+  #
+  #   restart: unless-stopped
+# Usage:
+#   1. Create cron.yaml with your playlist configurations
+#   2. Run: docker-compose -f docker-compose.cron.yml up -d
+#   4. View logs: docker-compose -f docker-compose.cron.yml logs -f musicload-cron
+#   5. Stop: docker-compose -f docker-compose.cron.yml down
+#
+# Files structure:
+#   ./downloads/                    - Downloaded audio files
+#   ./downloads/.musicload/state/     - State files (playlist tracking)
+#   ./downloads/{playlist}.m3u      - Generated M3U playlists
+#   ./cron.yaml                     - Cron configuration
+#   ./.env                          - Environment variables (optional)

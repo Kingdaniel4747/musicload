@@ -1,0 +1,27 @@
+services:
+  musicload:
+    build:
+      context: .
+      args:
+        # Match host user UID/GID for volume permissions (default: 1000)
+        UID: ${UID:-1000}
+        GID: ${GID:-1000}
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./downloads:/downloads
+      - ./.musicload:/app/.musicload # Persistent storage for uploaded cookies
+      # - ./cookies:/cookies  # Optional: for env var cookie method
+    environment:
+      - MUSICLOAD_DOWNLOAD_DIR=/downloads
+      - MUSICLOAD_AUDIO_FORMAT=opus
+      - MUSICLOAD_WEB_PORT=8000
+      - MUSICLOAD_WEB_PLAYLIST=web-downloads
+      # - YT_DLP_COOKIE_FILE=/cookies/cookies.txt  # Optional: use env var instead of web upload
+      # - MUSICLOAD_CORS_ORIGINS=*  # Optional: CORS allowed origins (default: *)
+      # - MUSICLOAD_REPLAYGAIN=true  # Optional: Apply ReplayGain/R128 loudness normalization tags
+      # - MUSICLOAD_DATA_DIR=/downloads
+      # - GOTIFY_URL=  # Optional: Gotify server URL
+      # - GOTIFY_TOKEN=  # Optional: Gotify app token
+    restart: unless-stopped

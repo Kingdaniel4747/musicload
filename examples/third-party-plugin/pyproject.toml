@@ -1,0 +1,31 @@
+[project]
+name = "musicload-demo"
+version = "0.1.0"
+description = "Demo plugin for musicload - example third-party plugin"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+license = {text = "MIT"}
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+]
+
+# Musicload is a dependency (the plugin uses musicload.plugins.base)
+dependencies = [
+    "musicload>=0.4.0",
+]
+
+# IMPORTANT: Register the plugin via entry points
+# Musicload will automatically discover this plugin when installed
+[project.entry-points."musicload.plugins"]
+demo = "musicload_demo.plugin:DemoPlugin"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

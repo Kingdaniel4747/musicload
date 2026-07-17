@@ -1,0 +1,31 @@
+{
+  "songs": [
+    {
+      "artist": "The Beatles",
+      "title": "Hey Jude",
+      "album": "1 (Compilation)",
+      "duration": 431
+    },
+    {
+      "artist": "Queen",
+      "title": "Bohemian Rhapsody",
+      "album": "A Night at the Opera"
+    },
+    {
+      "artist": "Pink Floyd",
+      "title": "Comfortably Numb",
+      "album": "The Wall",
+      "duration": 382
+    },
+    {
+      "artist": "Led Zeppelin",
+      "title": "Stairway to Heaven"
+    },
+    {
+      "artist": "Nirvana",
+      "title": "Smells Like Teen Spirit",
+      "album": "Nevermind",
+      "duration": 301
+    }
+  ]
+}
