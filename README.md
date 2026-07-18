@@ -4,109 +4,157 @@
 
 # Musicload
 
-Musicload is a self-hosted music discovery and download service. It combines a fast web interface with YouTube Music search, local-file playback, album downloads, scheduled synchronisation, and optional source plugins such as ListenBrainz.
+Musicload is the missing link between **ListenBrainz**, your personal music library, and **Navidrome**. It is a fast, mobile-friendly web app for finding music, downloading full albums, managing local files, and automatically fetching your ListenBrainz Weekly Exploration.
 
-It is designed to run alongside a personal music server. Downloaded files stay on your own storage and can be indexed by Navidrome, Jellyfin, or another compatible server.
+It deliberately stays simple: Musicload downloads music into your own library, and Navidrome remains your player and library server.
 
-## What it does
+## How the workflow works
 
-- Search for studio audio tracks and download them as Opus, MP3, or FLAC
-- Browse albums, new releases, charts, moods, and local files
-- Listen to short previews and delete local files from the web interface
-- Download complete albums into artist/album folders
-- Run scheduled playlist, explore, and plugin synchronisation
-- Use ListenBrainz, RSS, Reddit, and Billboard source plugins
-- Install the web interface as a mobile app
+```mermaid
+flowchart LR
+    A["ListenBrainz\nWeekly Exploration"] -->|"scheduled cron job"| B["Musicload\nfinds and downloads music"]
+    C["Explore / Search\nmanual downloads"] --> B
+    D["Your own music files"] --> E["Artist / Album folder"]
+    B --> E
+    E -->|"regular library scan"| F["Navidrome\nupdated music library"]
+```
 
-## Run locally with Docker Compose
+1. Connect Navidrome to your ListenBrainz account in Navidrome's ListenBrainz/scrobbling settings. Your listening history is then sent to ListenBrainz.
+2. ListenBrainz creates your **Weekly Exploration** recommendations.
+3. Musicload's cron worker reads those recommendations on the schedule you choose and downloads the tracks.
+4. With `MUSICLOAD_ORGANIZATION_MODE: album`, downloads are stored as `Artist/Album/Track` instead of a flat folder.
+5. Navidrome scans the same music folder and adds new files to its library automatically at its next regular scan.
+
+Manual downloads work in exactly the same way: search or explore in Musicload, press **Download**, and the track is placed in the album structure. To add your own music, simply copy it into the same `Artist/Album` folder; Navidrome and Musicload will see it as local music.
+
+## Quick start
+
+You need only two files next to each other:
+
+- `docker-compose.yml` — starts Musicload **and** the cron worker together.
+- `cron.yaml` — your ListenBrainz schedule. Start with [`cron.example.yaml`](cron.example.yaml).
+
+In `docker-compose.yml`, set the left side of this volume to your real music folder or NAS path:
+
+```yaml
+- /mnt/storage/media/Musik:/downloads
+```
+
+In `cron.yaml`, keep only the ListenBrainz job you want. Example for Weekly Exploration every Monday at 08:00:
+
+```yaml
+playlists: {}
+plugins:
+  listenbrainz-weekly:
+    type: listenbrainz
+    sync: false
+    schedule: "0 8 * * 1"
+    config:
+      user: your_listenbrainz_username
+      recommendation_type: weekly-exploration
+explore: {}
+hooks: []
+```
+
+Then start everything with one command:
 
 ```bash
-git clone https://github.com/YOUR_GITHUB_USERNAME/musicload.git
-cd musicload
 docker compose up -d
 ```
 
-Open `http://SERVER_IP:8000`. This starts both the web interface and the cron worker. Before the first start, copy `cron.example.yaml` to `cron.yaml` and configure the schedules you want.
+Open `http://SERVER_IP:8000`.
 
-For a NAS folder, different port, user ID, or GitHub image owner, edit the values directly in `docker-compose.yml`. The music path is the left side of this line:
-
-```yaml
-- ./music/folder:/downloads
-```
-
-Useful everyday commands:
+Useful commands:
 
 ```bash
-# Show live logs
+# View logs from the web app and cron worker
 docker compose logs -f
 
-# Install the newest published version
+# Update the published image and restart both services
 docker compose pull && docker compose up -d
 
-# Stop everything
+# Stop both services
 docker compose down
 ```
 
-Musicload stores audio files and persistent application data in the selected music folder. The application data is kept in its hidden `.musicload` subfolder.
+Musicload keeps its state, cookies, and cron history in the hidden `.musicload` folder inside your music directory. Do not delete that folder unless you intentionally want to reset Musicload's history.
 
-## Run the published image
+## Navidrome setup
 
-After publishing the GitHub repository, GitHub Actions creates this image automatically:
-
-```bash
-docker pull ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest
-
-docker run -d \
-  --name musicload \
-  --restart unless-stopped \
-  -p 8000:8000 \
-  -v ./downloads:/downloads \
-  -e MUSICLOAD_DOWNLOAD_DIR=/downloads \
-  -e MUSICLOAD_AUDIO_FORMAT=opus \
-  ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest
-```
-
-For public `docker pull` access, set the published package to **Public** in the GitHub Packages settings after the first successful workflow run.
-
-## Configuration
-
-All settings use the `MUSICLOAD_` prefix. Common options:
+Mount the **same host music folder** into both containers. Musicload needs write access; Navidrome can use a read-only mount:
 
 ```yaml
-environment:
-  - MUSICLOAD_DOWNLOAD_DIR=/downloads
-  - MUSICLOAD_AUDIO_FORMAT=opus
-  - MUSICLOAD_ORGANIZATION_MODE=album
-  - MUSICLOAD_REPLAYGAIN=false
-  - MUSICLOAD_WEB_PORT=8000
-  # Optional: defaults to /downloads/.musicload
-  - MUSICLOAD_DATA_DIR=/downloads/.musicload
+# Musicload
+- /mnt/storage/media/Musik:/downloads
+
+# Navidrome
+- /mnt/storage/media/Musik:/music:ro
 ```
 
-See [`docker-compose.yml`](docker-compose.yml) and [`cron.example.yaml`](cron.example.yaml) for the complete setup. The Compose file also contains ready-to-uncomment options for cookies, Gotify, Navidrome protection, and Nginx Proxy Manager.
+That shared folder is all Navidrome needs to discover Musicload downloads. Ensure Navidrome's normal library scanner is enabled; new music appears after its next scan.
 
-## HTTPS and the Android share feature
+## Install as an app
 
-The Android share-to-Musicload feature needs a real installed PWA. Serve Musicload through HTTPS, for example with Caddy, Nginx Proxy Manager, Cloudflare Tunnel, or Tailscale. A plain `http://192.168.x.x` address can be used for the website, but Android may not register it as a reliable share target.
+Musicload is a Progressive Web App (PWA). For reliable installation and Android sharing, serve it through a trusted **HTTPS** address — for example with Nginx Proxy Manager, Caddy, Cloudflare Tunnel, or Tailscale.
 
-## Publish your own repository and Docker image
+### Android (Chrome)
 
-1. Create an empty GitHub repository named `musicload`.
-2. Push this repository to it:
+1. Open your Musicload HTTPS address in Chrome.
+2. Open the three-dot menu.
+3. Choose **Install app** or **Add to Home screen**.
+4. Open Musicload from the new red Musicload icon.
 
-   ```bash
-   git init
-   git add .
-   git commit -m "Initial Musicload release"
-   git branch -M main
-   git remote add origin https://github.com/YOUR_GITHUB_USERNAME/musicload.git
-   git push -u origin main
-   ```
+### iPhone and iPad (Safari)
 
-3. Open the repository's **Actions** tab. The included workflow builds and publishes `ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest` for every push to `main`.
-4. After the first run, open the package settings under **Packages** and set its visibility to **Public** if other people should be able to pull it.
-5. Add release notes and a version tag whenever you publish a new release.
+1. Open your Musicload HTTPS address in Safari.
+2. Tap **Share**.
+3. Choose **Add to Home Screen**.
+4. Confirm **Add**. Musicload opens from its red home-screen icon like a normal app.
+
+After changing the icon, remove the existing home-screen shortcut once and add it again so the device refreshes its cached icon.
+
+## Environment options
+
+All settings live directly in `docker-compose.yml`; no `.env` file is required. The defaults in the included Compose file are already suitable for most installations.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
+| `MUSICLOAD_DATA_DIR` | `/downloads/.musicload` | State, cookies, cache, and cron history. |
+| `MUSICLOAD_WEB_PORT` | `8000` | Web server port inside the container. |
+| `MUSICLOAD_AUDIO_FORMAT` | `opus` | `opus`, `mp3`, or `flac`. |
+| `MUSICLOAD_ORGANIZATION_MODE` | `flat` | Use `album` for `Artist/Album/Track` folders. |
+| `MUSICLOAD_FILENAME_TEMPLATE` | artist – title | Custom filename pattern for flat downloads. |
+| `MUSICLOAD_USE_PRIMARY_ARTIST` | `false` | Prefer the main artist over a complete artist list. |
+| `MUSICLOAD_ALLOW_UGC` | `false` | Allow user-generated YouTube uploads in results. |
+| `MUSICLOAD_REPLAYGAIN` | `false` | Write ReplayGain/R128 loudness tags. |
+| `MUSICLOAD_WEB_PLAYLIST` | unset | Optional M3U playlist name for manual web downloads. |
+| `MUSICLOAD_MULTI_USER` | `false` | Prefix web playlists by remote user. |
+| `MUSICLOAD_CORS_ORIGINS` | `*` | Allowed browser origins, comma-separated. |
+| `MUSICLOAD_COOKIE_MODE` | `auto` | Cookie usage: `auto`, `always`, or `never`. |
+| `MUSICLOAD_COOKIE_RETRY_DELAY` | `1.0` | Wait time before a cookie retry, in seconds. |
+| `MUSICLOAD_LOG_COOKIE_USAGE` | `true` | Log whether cookies are used. |
+| `MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS` | `168` | How long unavailable tracks are remembered; `0` disables it. |
+| `MUSICLOAD_LYRICS_CACHE_HOURS` | `168` | Negative lyrics-cache lifetime; `0` never expires. |
+| `YT_DLP_COOKIE_FILE` | unset | Optional mounted `cookies.txt` path. |
+| `GOTIFY_URL` / `GOTIFY_TOKEN` | unset | Optional Gotify notifications. |
+
+## Published Docker image
+
+The ready-to-use image is published by GitHub Actions:
+
+```text
+ghcr.io/kingdaniel4747/musicload:latest
+```
+
+The included Compose file pulls it automatically. If you publish a fork, replace the image owner in `docker-compose.yml` with your own lowercase GitHub name.
+
+## Publish your own image
+
+1. Create an empty GitHub repository named `musicload` and push this project to its `main` branch.
+2. The included GitHub Action builds `ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest` automatically.
+3. In GitHub Packages, set the package visibility to **Public** when other people should be able to pull it.
 
 ## License
 
-This repository is licensed under the [MIT License](LICENSE). The copyright notice in that file must remain in copies and derivatives.
+Musicload is distributed under the [MIT License](LICENSE). Keep the copyright notice in copies and derivatives.
