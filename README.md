@@ -209,3 +209,12 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 ## License
 
 Musicload is distributed under the [MIT License](LICENSE). Keep the copyright notice in copies and derivatives.
+
+---
+
+<div align="center">
+  <p>If Musicload makes your music workflow easier, you can support the project:</p>
+  <a href="https://ko-fi.com/kingdaniel4747">
+    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support Musicload on Ko-fi">
+  </a>
+</div>
