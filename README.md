@@ -6,6 +6,16 @@ Musicload is the missing link between **Music** and **Navidrome**. It is a fast,
 
 It deliberately stays simple: Musicload downloads music into your own library, and Navidrome remains your player and library server.
 
+## Preview
+
+<p align="center">
+  <img src="musicload-desktop-showcase.png" alt="Musicload running on a laptop" width="100%" />
+</p>
+
+<p align="center">
+  <img src="musicload-mobile-showcase.png" alt="Musicload Explore, Downloads, and Library on mobile" width="100%" />
+</p>
+
 ## How the workflow works
 
 1. Connect Navidrome to your ListenBrainz account in Navidrome's settings. Your listening history is then sent to ListenBrainz.
