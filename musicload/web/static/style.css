@@ -2296,7 +2296,7 @@ header h1 .version, header p { display: none; }
 .library-delete-btn::after {
     content: "×";
     display: block;
-    transform: translateY(-1px);
+    transform: translateY(-2px);
     font-size: 1.45rem;
     font-weight: 400;
     line-height: 0.9;
