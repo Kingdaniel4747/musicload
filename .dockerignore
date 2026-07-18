@@ -1,0 +1,32 @@
+# Version control and development metadata
+.git
+.github
+.codex
+.agents
+
+# Local Python environments, caches, and test files
+.venv
+**/__pycache__
+**/*.py[cod]
+.coverage
+.pytest_cache
+.ruff_cache
+.mypy_cache
+tests
+docs
+
+# Local archives and generated output
+*.zip
+*.log
+outputs
+
+# Local runtime data and private configuration
+music
+cookies
+cron.yaml
+docker-compose.yml
+
+# Repository-only images used by the README
+musicload.png
+musicload-logo.svg
+musicload-*-showcase.png
