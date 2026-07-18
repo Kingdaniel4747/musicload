@@ -2,8 +2,6 @@
   <img src="musicload-logo.svg" alt="Musicload" width="440" />
 </p>
 
-# Musicload
-
 Musicload is the missing link between **ListenBrainz**, your personal music library, and **Navidrome**. It is a fast, mobile-friendly web app for finding music, downloading full albums, managing local files, and automatically fetching your ListenBrainz Weekly Exploration.
 
 It deliberately stays simple: Musicload downloads music into your own library, and Navidrome remains your player and library server.
