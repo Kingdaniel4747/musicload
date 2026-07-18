@@ -15,22 +15,6 @@
     --error-text: #ad0a2b;
 }
 
-/* Light theme */
-.light-theme {
-    --bg-primary: #f5f5f5;
-    --bg-secondary: #ffffff;
-    --bg-tertiary: #e8e8e8;
-    --text-primary: #1a1a1a;
-    --text-secondary: #666;
-    --text-tertiary: #999;
-    --accent-primary: #ad0a2b;
-    --accent-hover: #ad1937;
-    --border-color: #ddd;
-    --border-hover: #ccc;
-    --error-bg: #ffe8ec;
-    --error-text: #ad0a2b;
-}
-
 * {
     box-sizing: border-box;
     margin: 0;
@@ -116,28 +100,6 @@ header p {
 .format-selector:focus {
     outline: none;
     border-color: var(--accent-primary);
-}
-
-.theme-toggle {
-    background: var(--bg-tertiary);
-    border: 2px solid var(--border-color);
-    border-radius: 8px;
-    padding: 0.5rem;
-    cursor: pointer;
-    font-size: 1.5rem;
-    line-height: 1;
-    transition: all 0.2s;
-    min-height: 44px;
-    min-width: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    position: relative;
-}
-
-.theme-toggle:hover {
-    border-color: var(--accent-primary);
-    transform: scale(1.1);
 }
 
 .search-form {
@@ -741,6 +703,57 @@ header p {
     .chart-track .track-actions {
         flex-basis: 100%;
     }
+}
+
+/* Final interface polish: dark-only UI, clearer local actions, and in-app confirmations. */
+.library-explore-btn {
+    padding-left: 1rem;
+    padding-right: 1rem;
+}
+
+.downloads-empty {
+    display: grid;
+    gap: 0.3rem;
+    min-height: 9rem;
+    place-content: center;
+    padding: 1.25rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.downloads-empty strong {
+    color: var(--text-primary);
+    font-size: 1rem;
+}
+
+.downloads-empty span {
+    max-width: 25rem;
+    font-size: 0.88rem;
+}
+
+.confirm-modal-content {
+    max-width: 27rem;
+}
+
+.confirm-modal .modal-body {
+    display: grid;
+    gap: 1.4rem;
+}
+
+.confirm-modal #confirm-message {
+    color: var(--text-secondary);
+    line-height: 1.55;
+}
+
+.modal-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 0.65rem;
+}
+
+.modal-actions .btn {
+    min-height: 2.45rem;
+    padding: 0 0.9rem;
 }
 
 /* Small to medium screens (480px - 640px) */
@@ -1979,7 +1992,7 @@ header h1 .version, header p { display: none; }
     width: auto;
 }
 
-.format-selector, .theme-toggle, .icon-btn {
+.format-selector, .icon-btn {
     min-height: 2.45rem;
     height: 2.45rem;
     border: 1px solid transparent;
@@ -1996,8 +2009,8 @@ header h1 .version, header p { display: none; }
     background: var(--bg-secondary);
     border-color: var(--border-color);
 }
-.theme-toggle, .icon-btn { min-width: 2.45rem; font-size: 1rem; }
-.theme-toggle:hover, .icon-btn:hover, #explore-btn:hover {
+.icon-btn { min-width: 2.45rem; font-size: 1rem; }
+.icon-btn:hover, #explore-btn:hover {
     background: var(--bg-tertiary);
     border-color: var(--border-hover);
     color: var(--text-primary);
@@ -2206,7 +2219,7 @@ header h1 .version, header p { display: none; }
     header h1 { font-size: 1.1rem; }
     #explore-btn, #library-btn, #downloads-btn { display: none; }
     .format-selector { display: none; }
-    .theme-toggle, #settings-btn { min-width: 2.2rem; min-height: 2.2rem; height: 2.2rem; }
+    #cookies-btn { min-width: 2.2rem; min-height: 2.2rem; height: 2.2rem; }
     .search-form { margin: 0.75rem 0 1rem; }
     .search-form button[type="submit"] { min-width: 3.2rem; padding: 0.75rem; font-size: 0; }
     .search-form button[type="submit"]::after { content: "Search"; font-size: 0.78rem; }
@@ -2282,9 +2295,11 @@ header h1 .version, header p { display: none; }
 }
 .library-delete-btn::after {
     content: "×";
+    display: block;
+    transform: translateY(-1px);
     font-size: 1.45rem;
     font-weight: 400;
-    line-height: 1;
+    line-height: 0.9;
 }
 .library-delete-btn:hover:not(:disabled) {
     border-color: var(--accent-hover);
@@ -2322,6 +2337,8 @@ header h1 .version, header p { display: none; }
 .mini-player[hidden] { display: none !important; }
 .mini-player-info, .mini-player-stop { display: none !important; }
 .mini-player-toggle {
+    display: grid;
+    place-items: center;
     width: 100%;
     height: 100%;
     min-width: 0;
@@ -2331,6 +2348,8 @@ header h1 .version, header p { display: none; }
     background: transparent;
     color: #fff;
     font-size: 1.15rem;
+    line-height: 1;
+    padding: 0;
     cursor: pointer;
 }
 .mini-player-toggle:hover { background: rgba(255, 255, 255, 0.16); }

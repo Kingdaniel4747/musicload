@@ -52,7 +52,7 @@
               id="library-btn"
               class="icon-btn"
               aria-label="Local Library"
-              title="Lokale Dateien"
+              title="Local Files"
             >
               📁
             </button>
@@ -66,19 +66,12 @@
               <span id="downloads-badge" class="downloads-badge" hidden>0</span>
             </button>
             <button
-              id="theme-toggle"
-              class="theme-toggle"
-              aria-label="Toggle theme"
-            >
-              <span class="theme-icon">🌙</span>
-            </button>
-            <button
-              id="settings-btn"
+              id="cookies-btn"
               class="icon-btn"
-              aria-label="Settings"
-              title="Settings"
+              aria-label="Cookies"
+              title="Cookies"
             >
-              ⚙️
+              🍪
             </button>
           </div>
         </div>
@@ -90,7 +83,7 @@
             type="text"
             id="search-input"
             name="q"
-            placeholder="Search for music or paste url..."
+            placeholder="Search music, artists, albums, or paste a URL..."
             autocomplete="off"
             required
           />
@@ -99,7 +92,7 @@
             class="search-clear-btn"
             id="search-clear-btn"
             aria-label="Clear search"
-            title="Clear"
+            title="Clear search"
           >
             ✕
           </button>
@@ -157,16 +150,16 @@
       </button>
     </nav>
 
-    <!-- Settings Modal -->
-    <div id="settings-modal" class="modal">
+    <!-- Cookies Modal -->
+    <div id="cookies-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cookies-title">
       <div class="modal-content">
         <div class="modal-header">
-          <h2>Settings</h2>
+          <h2 id="cookies-title">Cookies</h2>
           <button class="modal-close">&times;</button>
         </div>
         <div class="modal-body">
           <section class="settings-section">
-            <h3>Cookie Authentication</h3>
+            <h3>Upload cookies.txt</h3>
             <p class="settings-description">
               Upload a cookies.txt file to access age-restricted or
               region-locked content.
@@ -197,10 +190,26 @@
                 class="btn btn-danger"
                 style="display: none"
               >
-                Delete Cookie File
+                Delete Uploaded Cookie
               </button>
             </div>
           </section>
+        </div>
+      </div>
+    </div>
+
+    <div id="confirm-modal" class="modal confirm-modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-message">
+      <div class="modal-content confirm-modal-content">
+        <div class="modal-header">
+          <h2 id="confirm-title">Delete file?</h2>
+          <button id="confirm-close" class="modal-close" aria-label="Close">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p id="confirm-message"></p>
+          <div class="modal-actions">
+            <button id="confirm-cancel" class="btn">Cancel</button>
+            <button id="confirm-action" class="btn btn-danger">Delete</button>
+          </div>
         </div>
       </div>
     </div>
@@ -213,43 +222,6 @@
           });
         });
       }
-
-      // Theme management
-      const themeToggle = document.getElementById("theme-toggle");
-      const themeIcon = document.querySelector(".theme-icon");
-      const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
-
-      function initTheme() {
-        const savedTheme = localStorage.getItem("theme");
-        const theme = savedTheme || (prefersDark.matches ? "dark" : "light");
-        setTheme(theme);
-      }
-
-      function setTheme(theme) {
-        if (theme === "light") {
-          document.body.classList.add("light-theme");
-          themeIcon.textContent = "☀️";
-        } else {
-          document.body.classList.remove("light-theme");
-          themeIcon.textContent = "🌙";
-        }
-        localStorage.setItem("theme", theme);
-      }
-
-      function toggleTheme() {
-        const isLight = document.body.classList.contains("light-theme");
-        setTheme(isLight ? "dark" : "light");
-      }
-
-      themeToggle.addEventListener("click", toggleTheme);
-      initTheme();
-
-      // Listen for system preference changes
-      prefersDark.addEventListener("change", (e) => {
-        if (!localStorage.getItem("theme")) {
-          setTheme(e.matches ? "dark" : "light");
-        }
-      });
 
       // Format management
       const formatSelector = document.getElementById("format-selector");
@@ -414,6 +386,12 @@
           return;
         }
 
+        if (currentTab === "downloads") {
+          showStatus("");
+          updateQueueUI(queueJobs);
+          return;
+        }
+
         // Clear results, zurück zu Explore
         songsResults.innerHTML = "";
         albumsResults.innerHTML = "";
@@ -423,7 +401,10 @@
       }
 
       // Event listeners for clear button
-      searchInput.addEventListener("input", updateClearButtonVisibility);
+      searchInput.addEventListener("input", () => {
+        updateClearButtonVisibility();
+        if (currentTab === "downloads") updateQueueUI(queueJobs);
+      });
       searchClearBtn.addEventListener("click", clearSearch);
 
       // Initialize clear button visibility
@@ -440,7 +421,19 @@
       let libraryTotal = 0;
       const LIBRARY_PAGE_SIZE = 30;
       let currentTab = "explore";
+      let queueJobs = [];
       let viewingAlbum = null; // Tracks current album view mode { id, title, query }
+
+      function updateSearchContext() {
+        const placeholders = {
+          explore: "Search music, artists, albums, or paste a URL...",
+          songs: "Search music, artists, albums, or paste a URL...",
+          albums: "Search albums or paste a URL...",
+          library: "Search local files...",
+          downloads: "Search downloads...",
+        };
+        searchInput.placeholder = placeholders[currentTab] || placeholders.explore;
+      }
 
       tabButtons.forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -727,6 +720,7 @@
 
       function setActiveTab(tab, skipExploreLoad = false) {
         currentTab = tab;
+        updateSearchContext();
         document.querySelectorAll(".mobile-nav-btn").forEach((button) => {
           button.classList.toggle("active", button.dataset.mobileTab === tab);
         });
@@ -771,6 +765,7 @@
         } else if (tab === "downloads") {
           downloadsResults.classList.add("active");
           resultTypeToggle.style.display = "none";
+          updateQueueUI(queueJobs);
         }
       }
 
@@ -1047,6 +1042,11 @@
         if (currentTab === "library") {
           updateUrlParams(query, "library");
           loadLibraryContent(true, query);
+          return;
+        }
+
+        if (currentTab === "downloads") {
+          updateQueueUI(queueJobs);
           return;
         }
 
@@ -1504,6 +1504,7 @@
         const queueList = document.getElementById("queue-list");
         const queueSection = document.getElementById("queue-section");
         const downloadsBadge = document.getElementById("downloads-badge");
+        queueJobs = jobs;
         const activeJobs = jobs.filter((job) =>
           job.status === "queued" || job.status === "downloading",
         );
@@ -1529,14 +1530,31 @@
           }
           previousJobStatuses[job.id] = job.status;
         }
+        queueSection.style.display = "block";
         if (jobs.length === 0) {
-          queueSection.style.display = "none";
+          queueList.innerHTML = `
+            <div class="downloads-empty">
+              <strong>No downloads yet</strong>
+              <span>Download a song or album from Explore or Search to see it here.</span>
+            </div>`;
           return;
         }
 
-        queueSection.style.display = "block";
+        const query = currentTab === "downloads" ? searchInput.value.trim().toLowerCase() : "";
+        const visibleJobs = query
+          ? jobs.filter((job) => `${job.title} ${job.artist}`.toLowerCase().includes(query))
+          : jobs;
 
-        queueList.innerHTML = jobs
+        if (visibleJobs.length === 0) {
+          queueList.innerHTML = `
+            <div class="downloads-empty">
+              <strong>No matching downloads</strong>
+              <span>Try a different title or artist.</span>
+            </div>`;
+          return;
+        }
+
+        queueList.innerHTML = visibleJobs
           .map((job) => {
             const statusClass = job.status.toLowerCase();
             let progressHtml = "";
@@ -1651,28 +1669,68 @@
       // Initialize queue on page load
       initQueue();
 
-      // Settings modal management
-      const settingsBtn = document.getElementById("settings-btn");
-      const settingsModal = document.getElementById("settings-modal");
-      const modalClose = settingsModal.querySelector(".modal-close");
+      // Reusable in-app confirmation dialog for destructive actions.
+      const confirmModal = document.getElementById("confirm-modal");
+      const confirmTitle = document.getElementById("confirm-title");
+      const confirmMessage = document.getElementById("confirm-message");
+      const confirmAction = document.getElementById("confirm-action");
+      const confirmCancel = document.getElementById("confirm-cancel");
+      const confirmClose = document.getElementById("confirm-close");
+      let confirmResolver = null;
+
+      function closeConfirmation(confirmed) {
+        confirmModal.classList.remove("active");
+        if (confirmResolver) {
+          confirmResolver(confirmed);
+          confirmResolver = null;
+        }
+      }
+
+      function askForConfirmation({ title, message, actionLabel = "Delete" }) {
+        confirmTitle.textContent = title;
+        confirmMessage.textContent = message;
+        confirmAction.textContent = actionLabel;
+        confirmModal.classList.add("active");
+        confirmAction.focus();
+        return new Promise((resolve) => {
+          confirmResolver = resolve;
+        });
+      }
+
+      confirmAction.addEventListener("click", () => closeConfirmation(true));
+      confirmCancel.addEventListener("click", () => closeConfirmation(false));
+      confirmClose.addEventListener("click", () => closeConfirmation(false));
+      confirmModal.addEventListener("click", (event) => {
+        if (event.target === confirmModal) closeConfirmation(false);
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && confirmModal.classList.contains("active")) {
+          closeConfirmation(false);
+        }
+      });
+
+      // Cookies modal management
+      const cookiesBtn = document.getElementById("cookies-btn");
+      const cookiesModal = document.getElementById("cookies-modal");
+      const modalClose = cookiesModal.querySelector(".modal-close");
       const cookieFileInput = document.getElementById("cookie-file-input");
       const uploadCookieBtn = document.getElementById("upload-cookie-btn");
       const deleteCookieBtn = document.getElementById("delete-cookie-btn");
       const cookieStatus = document.getElementById("cookie-status");
 
-      // Open settings
-      settingsBtn.addEventListener("click", async () => {
-        settingsModal.classList.add("active");
+      // Open cookies
+      cookiesBtn.addEventListener("click", async () => {
+        cookiesModal.classList.add("active");
         await refreshCookieStatus();
       });
 
-      // Close settings
+      // Close cookies
       modalClose.addEventListener("click", () => {
-        settingsModal.classList.remove("active");
+        cookiesModal.classList.remove("active");
       });
-      settingsModal.addEventListener("click", (e) => {
-        if (e.target === settingsModal) {
-          settingsModal.classList.remove("active");
+      cookiesModal.addEventListener("click", (e) => {
+        if (e.target === cookiesModal) {
+          cookiesModal.classList.remove("active");
         }
       });
 
@@ -1747,9 +1805,12 @@
 
       // Delete cookie file
       deleteCookieBtn.addEventListener("click", async () => {
-        if (
-          !confirm("Are you sure you want to delete the uploaded cookie file?")
-        ) {
+        const confirmed = await askForConfirmation({
+          title: "Delete uploaded cookie?",
+          message: "This removes the cookies.txt file stored by Musicload. You can upload a new file later.",
+          actionLabel: "Delete Cookie",
+        });
+        if (!confirmed) {
           return;
         }
 
@@ -2746,8 +2807,8 @@
                 </div>
               </div>
               <div class="track-actions">
-                <button class="play-btn library-play-btn" data-entry-path="${escapeHtml(track.entry_path)}" aria-label="Play file" title="Anspielen">▶</button>
-                <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}" aria-label="Delete file" title="Von der Festplatte loeschen">Delete</button>
+                <button class="play-btn library-play-btn" data-entry-path="${escapeHtml(track.entry_path)}" aria-label="Play preview" title="Play preview">▶</button>
+                <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}" aria-label="Delete file" title="Delete file">Delete</button>
               </div>
             </div>
           `,
@@ -2808,12 +2869,12 @@
           }, { once: true });
           currentAudio.addEventListener("ended", stopCurrentAudio, { once: true });
           currentAudio.addEventListener("error", () => {
-            showStatus("Die Datei konnte nicht abgespielt werden.", true);
+            showStatus("The file could not be played.", true);
             stopCurrentAudio();
           }, { once: true });
           await currentAudio.play();
         } catch (error) {
-          showStatus("Wiedergabe konnte nicht gestartet werden.", true);
+          showStatus("Playback could not be started.", true);
           stopCurrentAudio();
         }
       }
@@ -2824,11 +2885,12 @@
         const title = btn.dataset.title;
         const trackElement = btn.closest(".track");
 
-        if (
-          !confirm(
-            `"${title}" wirklich von der Festplatte löschen? Das kann nicht rückgängig gemacht werden.`,
-          )
-        ) {
+        const confirmed = await askForConfirmation({
+          title: "Delete local file?",
+          message: `Delete "${title}" permanently from your music folder? This cannot be undone.`,
+          actionLabel: "Delete File",
+        });
+        if (!confirmed) {
           return;
         }
 
