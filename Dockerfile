@@ -36,7 +36,6 @@ ENV PATH="/app/.venv/bin:${PATH}" \
 
 ENV MUSICLOAD_DOWNLOAD_DIR=/downloads
 ENV MUSICLOAD_WEB_PORT=8000
-ENV MUSICLOAD_WEB_PLAYLIST=web-downloads
 
 # Switch to non-root user
 USER musicload
