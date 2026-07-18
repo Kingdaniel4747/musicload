@@ -2,22 +2,13 @@
   <img src="musicload-logo.svg" alt="Musicload" width="440" />
 </p>
 
-Musicload is the missing link between **ListenBrainz**, your personal music library, and **Navidrome**. It is a fast, mobile-friendly web app for finding music, downloading full albums, managing local files, and automatically fetching your ListenBrainz Weekly Exploration.
+Musicload is the missing link between **Music** and **Navidrome**. It is a fast, mobile-friendly web app for finding music, downloading full albums, managing local files, and automatically fetching your ListenBrainz Weekly Exploration.
 
 It deliberately stays simple: Musicload downloads music into your own library, and Navidrome remains your player and library server.
 
 ## How the workflow works
 
-```mermaid
-flowchart LR
-    A["ListenBrainz\nWeekly Exploration"] -->|"scheduled cron job"| B["Musicload\nfinds and downloads music"]
-    C["Explore / Search\nmanual downloads"] --> B
-    D["Your own music files"] --> E["Artist / Album folder"]
-    B --> E
-    E -->|"regular library scan"| F["Navidrome\nupdated music library"]
-```
-
-1. Connect Navidrome to your ListenBrainz account in Navidrome's ListenBrainz/scrobbling settings. Your listening history is then sent to ListenBrainz.
+1. Connect Navidrome to your ListenBrainz account in Navidrome's settings. Your listening history is then sent to ListenBrainz.
 2. ListenBrainz creates your **Weekly Exploration** recommendations.
 3. Musicload's cron worker reads those recommendations on the schedule you choose and downloads the tracks.
 4. With `MUSICLOAD_ORGANIZATION_MODE: album`, downloads are stored as `Artist/Album/Track` instead of a flat folder.
@@ -62,9 +53,7 @@ playlists:
     schedule: "0 6 * * *"
 ```
 
-The cron worker intentionally supports only these two sources. Reddit, RSS,
-Billboard cron sources, Explore cron jobs, external command hooks, and direct
-Navidrome API access are not part of the minimal image.
+The cron worker intentionally supports only these two sources.
 
 Then start everything with one command:
 
@@ -74,18 +63,6 @@ docker compose up -d
 
 Open `http://SERVER_IP:8000`.
 
-Useful commands:
-
-```bash
-# View logs from the web app and cron worker
-docker compose logs -f
-
-# Update the published image and restart both services
-docker compose pull && docker compose up -d
-
-# Stop both services
-docker compose down
-```
 
 Musicload keeps its state, cookies, and cron history in the hidden `.musicload` folder inside your music directory. Do not delete that folder unless you intentionally want to reset Musicload's history.
 
@@ -121,8 +98,6 @@ Musicload is a Progressive Web App (PWA). For reliable installation and Android 
 3. Choose **Add to Home Screen**.
 4. Confirm **Add**. Musicload opens from its red home-screen icon like a normal app.
 
-After changing the icon, remove the existing home-screen shortcut once and add it again so the device refreshes its cached icon.
-
 ## Environment options
 
 All settings live directly in `docker-compose.yml`; no `.env` file is required. The defaults in the included Compose file are already suitable for most installations.
@@ -148,21 +123,6 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | `YT_DLP_COOKIE_FILE` | unset | Optional mounted `cookies.txt` path. |
 | `GOTIFY_URL` / `GOTIFY_TOKEN` | unset | Optional Gotify notifications. |
 
-## Published Docker image
-
-The ready-to-use image is published by GitHub Actions:
-
-```text
-ghcr.io/kingdaniel4747/musicload:latest
-```
-
-The included Compose file pulls it automatically. If you publish a fork, replace the image owner in `docker-compose.yml` with your own lowercase GitHub name.
-
-## Publish your own image
-
-1. Create an empty GitHub repository named `musicload` and push this project to its `main` branch.
-2. The included GitHub Action builds `ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest` automatically.
-3. In GitHub Packages, set the package visibility to **Public** when other people should be able to pull it.
 
 ## License
 
