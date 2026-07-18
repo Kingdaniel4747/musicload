@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Musicload">
+  <circle cx="64" cy="64" r="58" fill="#d60932"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="7">
+    <path d="M64 39v50M39 64h50M46.3 46.3l35.4 35.4M81.7 46.3 46.3 81.7"/>
+  </g>
+</svg>

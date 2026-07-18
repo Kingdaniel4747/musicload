@@ -1,0 +1,20 @@
+# Musicload cron configuration
+# Supported sources: ListenBrainz recommendations and YouTube playlists.
+
+# Optional YouTube / YouTube Music playlist subscriptions.
+# Keep sync false when downloaded songs should never be removed automatically.
+playlists: {}
+  # favorites:
+  #   url: https://music.youtube.com/playlist?list=YOUR_PLAYLIST_ID
+  #   sync: false
+  #   schedule: "0 6 * * *"
+
+# ListenBrainz Weekly Exploration every Monday at 08:00.
+plugins:
+  listenbrainz-weekly:
+    type: listenbrainz
+    sync: false
+    schedule: "0 8 * * 1"
+    config:
+      user: your_listenbrainz_username
+      recommendation_type: weekly-exploration

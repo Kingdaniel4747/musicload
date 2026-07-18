@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 136" role="img" aria-label="Musicload">
+  <rect width="440" height="136" rx="8" fill="#111214"/>
+  <circle cx="96" cy="68" r="37" fill="#d60932"/>
+  <g fill="none" stroke="#fff" stroke-linecap="round" stroke-width="4">
+    <path d="M96 47v42M75 68h42M81.2 53.2l29.6 29.6M110.8 53.2 81.2 82.8"/>
+  </g>
+  <text x="159" y="88" fill="#fff" font-family="Arial, Helvetica, sans-serif" font-size="51" font-weight="700" letter-spacing="-2">Musicload</text>
+</svg>
