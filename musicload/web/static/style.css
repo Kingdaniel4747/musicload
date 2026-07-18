@@ -1965,16 +1965,11 @@ header h1 {
     font-size: 1.18rem;
     letter-spacing: -0.04em;
 }
-header h1::before {
-    content: "✳";
-    display: grid;
-    place-items: center;
+header h1 .brand-mark {
+    display: block;
     width: 1.7rem;
     height: 1.7rem;
-    color: #fff;
-    background: var(--accent-primary);
-    border-radius: 50%;
-    font-size: 0.92rem;
+    flex: 0 0 auto;
 }
 header h1 .version, header p { display: none; }
 

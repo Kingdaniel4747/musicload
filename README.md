@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="musicload-logo.svg" alt="Musicload" width="440" />
+</p>
+
 # Musicload
 
 Musicload is a self-hosted music discovery and download service. It combines a fast web interface with YouTube Music search, local-file playback, album downloads, scheduled synchronisation, and optional source plugins such as ListenBrainz.
