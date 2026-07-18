@@ -87,17 +87,6 @@ flowchart TD
 
 All three workflows use the same shared music folder. Musicload does not require direct Navidrome API access—Navidrome discovers newly downloaded tracks through its regular library scan.
 
-### From Google song recognition on your phone
-
-Identify a song with Google, open the result, and use Android's **Share** action to send it to the installed Musicload app. Musicload opens the matching search so you can preview the result, confirm the correct version, and download it. The track is stored in the album folder and appears in Navidrome after its normal library scan.
-
-### Automatic ListenBrainz Weekly Exploration
-
-Connect Navidrome to ListenBrainz so your listening history is scrobbled automatically. ListenBrainz creates a new **Weekly Exploration**, and the Musicload cron worker downloads its tracks on your chosen schedule. They use the same album folder structure and are picked up by Navidrome automatically.
-
-### Manual search
-
-Search for a song, artist, album, or supported URL directly in Musicload. Preview the result, press **Download**, and the track becomes available in Navidrome through the shared music folder. Your own music can be copied into the same `Artist/Album` structure as well.
 
 Musicload does not need direct Navidrome API access for any of these workflows. Both applications simply use the same music directory, and Navidrome's regular scanner discovers the new files.
 
