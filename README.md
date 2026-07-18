@@ -18,27 +18,74 @@ It deliberately stays simple: Musicload downloads music into your own library, a
 
 ## How the workflow works
 
+### 1. Identify and share a song from your phone
+
 ```mermaid
-flowchart LR
-    subgraph PHONE["Phone: identify and share a song"]
-        A["Google song recognition"] -->|"Share result to Musicload"| B["Musicload opens the song search"]
-        B --> C["Preview and download"]
-    end
+flowchart TD
+    A["Google identifies the song"]
+    B["Tap Share"]
+    C["Send the result to Musicload"]
+    D["Preview the matching song"]
+    E["Download"]
+    F["Saved as Artist / Album / Track"]
+    G["Navidrome scans the music folder"]
+    H["The song is ready to play"]
 
-    subgraph MANUAL["Manual search"]
-        D["Search or Explore in Musicload"] --> E["Preview and download"]
-    end
+    A --> B --> C --> D --> E --> F --> G --> H
 
-    subgraph WEEKLY["Automatic weekly discovery"]
-        F["Listen in Navidrome"] -->|"Scrobbles"| G["ListenBrainz listening history"]
-        G -->|"Weekly Exploration"| H["Musicload cron downloads new tracks"]
-    end
+    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
+    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
 
-    C --> I["Artist / Album / Track"]
-    E --> I
-    H --> I
-    I -->|"Automatic library scan"| F
+    class C,D,E,F musicload;
+    class H final;
 ```
+
+### 2. Automatic ListenBrainz Weekly Exploration
+
+```mermaid
+flowchart TD
+    A["Listen to music in Navidrome"]
+    B["Navidrome sends your listening history to ListenBrainz"]
+    C["ListenBrainz creates Weekly Exploration"]
+    D["Musicload cron reads the recommendations"]
+    E["New tracks are downloaded automatically"]
+    F["Saved as Artist / Album / Track"]
+    G["Navidrome scans the music folder"]
+    H["The new recommendations are ready to play"]
+
+    A --> B --> C --> D --> E --> F --> G --> H
+
+    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
+    classDef listenbrainz fill:#27203d,stroke:#a78bfa,color:#ffffff,stroke-width:2px;
+    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
+
+    class C listenbrainz;
+    class D,E,F musicload;
+    class H final;
+```
+
+### 3. Search and download manually
+
+```mermaid
+flowchart TD
+    A["Open Musicload"]
+    B["Search for a song, artist, album, or URL"]
+    C["Preview the result"]
+    D["Press Download"]
+    E["Saved as Artist / Album / Track"]
+    F["Navidrome scans the music folder"]
+    G["The song is ready to play"]
+
+    A --> B --> C --> D --> E --> F --> G
+
+    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
+    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
+
+    class A,B,C,D,E musicload;
+    class G final;
+```
+
+All three workflows use the same shared music folder. Musicload does not require direct Navidrome API access—Navidrome discovers newly downloaded tracks through its regular library scan.
 
 ### From Google song recognition on your phone
 
