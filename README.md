@@ -32,7 +32,7 @@ Manual downloads work in exactly the same way: search or explore in Musicload, p
 You need only two files next to each other:
 
 - `docker-compose.yml` — starts Musicload **and** the cron worker together.
-- `cron.yaml` — your ListenBrainz schedule. Start with [`cron.example.yaml`](cron.yaml).
+- `cron.yaml` — your ListenBrainz schedule. Start with [`cron.yaml`](cron.yaml).
 
 In `docker-compose.yml`, set the left side of this volume to your real music folder or NAS path:
 
