@@ -18,6 +18,42 @@ It deliberately stays simple: Musicload downloads music into your own library, a
 
 ## How the workflow works
 
+```mermaid
+flowchart LR
+    subgraph PHONE["Phone: identify and share a song"]
+        A["Google song recognition"] -->|"Share result to Musicload"| B["Musicload opens the song search"]
+        B --> C["Preview and download"]
+    end
+
+    subgraph MANUAL["Manual search"]
+        D["Search or Explore in Musicload"] --> E["Preview and download"]
+    end
+
+    subgraph WEEKLY["Automatic weekly discovery"]
+        F["Listen in Navidrome"] -->|"Scrobbles"| G["ListenBrainz listening history"]
+        G -->|"Weekly Exploration"| H["Musicload cron downloads new tracks"]
+    end
+
+    C --> I["Artist / Album / Track"]
+    E --> I
+    H --> I
+    I -->|"Automatic library scan"| F
+```
+
+### From Google song recognition on your phone
+
+Identify a song with Google, open the result, and use Android's **Share** action to send it to the installed Musicload app. Musicload opens the matching search so you can preview the result, confirm the correct version, and download it. The track is stored in the album folder and appears in Navidrome after its normal library scan.
+
+### Automatic ListenBrainz Weekly Exploration
+
+Connect Navidrome to ListenBrainz so your listening history is scrobbled automatically. ListenBrainz creates a new **Weekly Exploration**, and the Musicload cron worker downloads its tracks on your chosen schedule. They use the same album folder structure and are picked up by Navidrome automatically.
+
+### Manual search
+
+Search for a song, artist, album, or supported URL directly in Musicload. Preview the result, press **Download**, and the track becomes available in Navidrome through the shared music folder. Your own music can be copied into the same `Artist/Album` structure as well.
+
+Musicload does not need direct Navidrome API access for any of these workflows. Both applications simply use the same music directory, and Navidrome's regular scanner discovers the new files.
+
 1. Connect Navidrome to your ListenBrainz account in Navidrome's settings. Your listening history is then sent to ListenBrainz.
 2. ListenBrainz creates your **Weekly Exploration** recommendations.
 3. Musicload's cron worker reads those recommendations on the schedule you choose and downloads the tracks.
