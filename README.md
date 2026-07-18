@@ -19,12 +19,31 @@ It is designed to run alongside a personal music server. Downloaded files stay o
 ```bash
 git clone https://github.com/YOUR_GITHUB_USERNAME/musicload.git
 cd musicload
-docker compose up -d --build
+docker compose up -d
 ```
 
-Open `http://SERVER_IP:8000`.
+Open `http://SERVER_IP:8000`. This starts both the web interface and the cron worker. Before the first start, copy `cron.example.yaml` to `cron.yaml` and configure the schedules you want.
 
-Musicload stores audio files in `./downloads` and its persistent application data in `./.musicload`.
+For a NAS folder, different port, user ID, or GitHub image owner, edit the values directly in `docker-compose.yml`. The music path is the left side of this line:
+
+```yaml
+- ./music/folder:/downloads
+```
+
+Useful everyday commands:
+
+```bash
+# Show live logs
+docker compose logs -f
+
+# Install the newest published version
+docker compose pull && docker compose up -d
+
+# Stop everything
+docker compose down
+```
+
+Musicload stores audio files and persistent application data in the selected music folder. The application data is kept in its hidden `.musicload` subfolder.
 
 ## Run the published image
 
@@ -38,7 +57,6 @@ docker run -d \
   --restart unless-stopped \
   -p 8000:8000 \
   -v ./downloads:/downloads \
-  -v ./.musicload:/app/.musicload \
   -e MUSICLOAD_DOWNLOAD_DIR=/downloads \
   -e MUSICLOAD_AUDIO_FORMAT=opus \
   ghcr.io/YOUR_GITHUB_USERNAME/musicload:latest
@@ -57,9 +75,11 @@ environment:
   - MUSICLOAD_ORGANIZATION_MODE=album
   - MUSICLOAD_REPLAYGAIN=false
   - MUSICLOAD_WEB_PORT=8000
+  # Optional: defaults to /downloads/.musicload
+  - MUSICLOAD_DATA_DIR=/downloads/.musicload
 ```
 
-See [`docker-compose.yml`](docker-compose.yml) and [`cron.example.yaml`](cron.example.yaml) for the complete setup.
+See [`docker-compose.yml`](docker-compose.yml) and [`cron.example.yaml`](cron.example.yaml) for the complete setup. The Compose file also contains ready-to-uncomment options for cookies, Gotify, Navidrome protection, and Nginx Proxy Manager.
 
 ## HTTPS and the Android share feature
 
