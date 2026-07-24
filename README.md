@@ -103,10 +103,14 @@ Manual downloads work in exactly the same way: search or explore in Musicload, p
 
 ## Quick start
 
-You need only two files next to each other:
+The included `docker-compose.yml` starts Musicload and the cron worker together.
+Open the gear button in the web interface to add, edit, or remove scheduled
+integrations. Musicload validates the form and stores the result as
+the included `cron.yaml`, which is mounted at `.musicload/cron.yaml` for both
+containers. The cron worker reloads changes automatically, so a container
+restart is not required.
 
-- `docker-compose.yml` — starts Musicload **and** the cron worker together.
-- `cron.yaml` — your ListenBrainz schedule. Start with [`cron.yaml`](cron.yaml).
+Keep the included `docker-compose.yml` and `cron.yaml` next to each other.
 
 In `docker-compose.yml`, set the left side of this volume to your real music folder or NAS path:
 
@@ -114,7 +118,8 @@ In `docker-compose.yml`, set the left side of this volume to your real music fol
 - /mnt/storage/media/Musik:/downloads
 ```
 
-In `cron.yaml`, keep only the ListenBrainz job you want. Example for Weekly Exploration every Monday at 08:00:
+The file created by the form is still ordinary YAML. Example for Weekly
+Exploration every Monday at 08:00:
 
 ```yaml
 playlists: {}
@@ -191,6 +196,7 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | --- | --- | --- |
 | `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
 | `MUSICLOAD_DATA_DIR` | `/downloads/.musicload` | State, cookies, cache, and cron history. |
+| `MUSICLOAD_CRON_CONFIG` | `$MUSICLOAD_DATA_DIR/cron.yaml` | Shared scheduled-integration configuration. |
 | `MUSICLOAD_WEB_PORT` | `8000` | Web server port inside the container. |
 | `MUSICLOAD_AUDIO_FORMAT` | `opus` | `opus`, `mp3`, or `flac`. |
 | `MUSICLOAD_ORGANIZATION_MODE` | `flat` | Use `album` for `Artist/Album/Track` folders. |

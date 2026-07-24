@@ -31,7 +31,6 @@ def cron_command(
         typer.Option(
             "--config",
             "-c",
-            exists=True,
             help="Path to cron configuration file (default: cron.yaml)",
         ),
     ] = Path("cron.yaml"),

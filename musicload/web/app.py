@@ -7,6 +7,7 @@ import logging
 import re
 import urllib.parse
 from pathlib import Path
+from typing import Literal
 
 import yt_dlp
 import httpx
@@ -170,6 +171,113 @@ class DownloadResponse(BaseModel):
     message: str
     file_path: str | None = None
     file_name: str | None = None
+
+
+class CronJobRequest(BaseModel):
+    """Structured cron job submitted by the settings form."""
+
+    type: Literal["youtube-playlist", "listenbrainz"]
+    schedule: str
+    sync: bool = False
+    url: str | None = None
+    user: str | None = None
+    recommendation_type: Literal["weekly-exploration", "weekly-jams"] | None = None
+
+
+@app.get("/api/cron/jobs")
+async def api_cron_jobs():
+    """Return all form-editable cron integrations."""
+    from musicload.cron.config import get_cron_config_path, load_config_document
+
+    document = load_config_document(get_cron_config_path())
+    jobs = []
+    for name, job in document["playlists"].items():
+        jobs.append({"name": name, "type": "youtube-playlist", **job})
+    for name, job in document["plugins"].items():
+        jobs.append(
+            {
+                "name": name,
+                "type": "listenbrainz",
+                "schedule": job["schedule"],
+                "sync": job["sync"],
+                "user": job["config"]["user"],
+                "recommendation_type": job["config"].get(
+                    "recommendation_type", "weekly-exploration"
+                ),
+            }
+        )
+    return {"jobs": jobs}
+
+
+@app.put("/api/cron/jobs/{name}")
+async def api_save_cron_job(name: str, request: CronJobRequest):
+    """Create or update one cron integration and atomically persist it."""
+    from musicload.cron.config import (
+        get_cron_config_path,
+        load_config_document,
+        save_config_document,
+        validate_job_name,
+    )
+
+    try:
+        safe_name = validate_job_name(name)
+        path = get_cron_config_path()
+        document = load_config_document(path)
+        document["playlists"].pop(safe_name, None)
+        document["plugins"].pop(safe_name, None)
+
+        if request.type == "youtube-playlist":
+            if not request.url:
+                raise ValueError("A YouTube playlist URL is required")
+            document["playlists"][safe_name] = {
+                "url": request.url.strip(),
+                "sync": request.sync,
+                "schedule": request.schedule.strip(),
+            }
+        else:
+            if not request.user:
+                raise ValueError("A ListenBrainz username is required")
+            document["plugins"][safe_name] = {
+                "type": "listenbrainz",
+                "sync": request.sync,
+                "schedule": request.schedule.strip(),
+                "config": {
+                    "user": request.user.strip(),
+                    "recommendation_type": request.recommendation_type
+                    or "weekly-exploration",
+                },
+            }
+        save_config_document(path, document)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except OSError as exc:
+        logger.exception("Could not save cron configuration")
+        raise HTTPException(status_code=500, detail="Could not save cron configuration") from exc
+    return {"success": True, "name": safe_name}
+
+
+@app.delete("/api/cron/jobs/{name}")
+async def api_delete_cron_job(name: str):
+    """Delete one cron integration."""
+    from musicload.cron.config import (
+        get_cron_config_path,
+        load_config_document,
+        save_config_document,
+        validate_job_name,
+    )
+
+    try:
+        safe_name = validate_job_name(name)
+        path = get_cron_config_path()
+        document = load_config_document(path)
+        existed = document["playlists"].pop(safe_name, None) is not None
+        existed = document["plugins"].pop(safe_name, None) is not None or existed
+        if not existed:
+            raise HTTPException(status_code=404, detail="Integration not found")
+        save_config_document(path, document)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"success": True}
 
 
 class TrackResponse(BaseModel):
