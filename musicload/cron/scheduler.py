@@ -3,7 +3,6 @@
 import logging
 import signal
 import sys
-import threading
 from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -23,8 +22,6 @@ class CronScheduler:
         self.config_path = config_path
         self.cron_config: CronConfig | None = None
         self.scheduler: BackgroundScheduler | None = None
-        self._config_signature: tuple[int, int] | None = None
-        self._reload_lock = threading.Lock()
 
         main_config = get_config()
         self.download_dir = download_dir or main_config.download_dir
@@ -35,14 +32,7 @@ class CronScheduler:
 
     def load_configuration(self) -> None:
         logger.info("Loading configuration from: %s", self.config_path)
-        if self.config_path.exists():
-            self.cron_config = load_config(self.config_path)
-            stat = self.config_path.stat()
-            self._config_signature = (stat.st_mtime_ns, stat.st_size)
-        else:
-            self.cron_config = CronConfig()
-            self._config_signature = None
-            logger.info("Cron configuration does not exist yet; waiting for web configuration")
+        self.cron_config = load_config(self.config_path)
 
     def start(self) -> None:
         if not self.cron_config:
@@ -55,44 +45,8 @@ class CronScheduler:
         for plugin_config in self.cron_config.plugins.values():
             self._schedule_plugin(plugin_config)
 
-        self.scheduler.add_job(
-            self._reload_if_changed,
-            "interval",
-            seconds=5,
-            id="_musicload_config_reload",
-            name="Reload cron configuration",
-            replace_existing=True,
-        )
         self.scheduler.start()
         logger.info("Cron scheduler started successfully")
-
-    def _reload_if_changed(self) -> None:
-        """Reload jobs after an atomic config update from the web UI."""
-        with self._reload_lock:
-            if not self.config_path.exists():
-                signature = None
-            else:
-                stat = self.config_path.stat()
-                signature = (stat.st_mtime_ns, stat.st_size)
-            if signature == self._config_signature:
-                return
-
-            try:
-                new_config = load_config(self.config_path) if signature else CronConfig()
-            except (OSError, ValueError) as exc:
-                logger.error("Ignoring invalid cron configuration update: %s", exc)
-                return
-
-            for job in self.scheduler.get_jobs():
-                if job.id != "_musicload_config_reload":
-                    job.remove()
-            self.cron_config = new_config
-            self._config_signature = signature
-            for playlist_config in new_config.playlists.values():
-                self._schedule_playlist(playlist_config)
-            for plugin_config in new_config.plugins.values():
-                self._schedule_plugin(plugin_config)
-            logger.info("Reloaded cron configuration")
 
     def _schedule_playlist(self, playlist_config) -> None:
         self.scheduler.add_job(

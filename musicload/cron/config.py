@@ -1,7 +1,6 @@
 """Load the minimal Musicload cron configuration."""
 
 import logging
-import os
 import re
 from pathlib import Path
 
@@ -15,17 +14,6 @@ logger = logging.getLogger(__name__)
 _SUPPORTED_SECTIONS = {"playlists", "plugins"}
 
 
-def get_cron_config_path() -> Path:
-    """Return the shared cron config path used by web and worker."""
-    configured = os.environ.get("MUSICLOAD_CRON_CONFIG")
-    if configured:
-        return Path(configured)
-
-    from musicload.config import get_config
-
-    return get_config().data_dir / "cron.yaml"
-
-
 def load_config(path: Path) -> CronConfig:
     """Load YouTube playlist and ListenBrainz jobs from a YAML file."""
     if not path.exists():
@@ -37,9 +25,7 @@ def load_config(path: Path) -> CronConfig:
     except yaml.YAMLError as exc:
         raise ValueError(f"Invalid YAML syntax: {exc}") from exc
 
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
+    if not isinstance(data, dict) or not data:
         raise ValueError("Config file must contain 'playlists' and/or 'plugins'")
 
     unsupported = set(data) - _SUPPORTED_SECTIONS
@@ -53,58 +39,15 @@ def load_config(path: Path) -> CronConfig:
     playlists = _load_playlists(data.get("playlists", {}))
     plugins = _load_listenbrainz_jobs(data.get("plugins", {}))
 
+    if not playlists and not plugins:
+        raise ValueError("Cron config does not contain any enabled jobs")
+
     logger.info(
         "Loaded %d YouTube playlist(s) and %d ListenBrainz job(s)",
         len(playlists),
         len(plugins),
     )
     return CronConfig(playlists=playlists, plugins=plugins)
-
-
-def load_config_document(path: Path) -> dict:
-    """Load a config document for editing, treating a missing file as empty."""
-    if not path.exists():
-        return {"playlists": {}, "plugins": {}}
-    config = load_config(path)
-    return {
-        "playlists": {
-            name: {
-                "url": job.url,
-                "sync": job.sync,
-                "schedule": job.schedule,
-            }
-            for name, job in config.playlists.items()
-        },
-        "plugins": {
-            name: {
-                "type": job.type,
-                "sync": job.sync,
-                "schedule": job.schedule,
-                "config": job.config,
-            }
-            for name, job in config.plugins.items()
-        },
-    }
-
-
-def save_config_document(path: Path, data: dict) -> None:
-    """Validate and atomically save a cron configuration document."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_name(f".{path.name}.tmp")
-    try:
-        with temporary.open("w", encoding="utf-8", newline="\n") as config_file:
-            yaml.safe_dump(
-                data,
-                config_file,
-                sort_keys=False,
-                allow_unicode=True,
-                default_flow_style=False,
-            )
-        load_config(temporary)
-        os.replace(temporary, path)
-    finally:
-        if temporary.exists():
-            temporary.unlink()
 
 
 def _load_playlists(data: object) -> dict[str, PlaylistConfig]:

@@ -9,8 +9,6 @@ services:
     volumes:
       # Change only the path on the left to your music folder or NAS path.
       - ./music/folder:/downloads
-      # Shared, writable integration configuration managed by the web UI.
-      - ./cron.yaml:/downloads/.musicload/cron.yaml
       # Musicload saves history, cookies, cache, and cron state automatically
       # in /downloads/.musicload alongside your music library.
       # Optional cookie-file method (instead of uploading cookies in the web UI):
@@ -21,7 +19,6 @@ services:
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
       MUSICLOAD_ALLOW_UGC: "false"
-      MUSICLOAD_CRON_CONFIG: /downloads/.musicload/cron.yaml
       # MUSICLOAD_DATA_DIR: /downloads/.musicload
       # YT_DLP_COOKIE_FILE: /cookies/cookies.txt
       # GOTIFY_URL: https://gotify.example.com
@@ -33,22 +30,21 @@ services:
     # networks: [npm_network]
 
   # Runs automatically together with the web interface.
-  # Configure integrations from the gear button in the web interface.
+  # Edit the included cron.yaml with your ListenBrainz user and/or YouTube playlists.
   musicload-cron:
     image: ghcr.io/kingdaniel4747/musicload:latest
     pull_policy: always
     container_name: musicload-cron
     user: 1000:1000
-    command: ["musicload", "cron", "--config", "/downloads/.musicload/cron.yaml"]
+    command: ["musicload", "cron", "--config", "/config/cron.yaml"]
     volumes:
       - ./music/folder:/downloads
-      - ./cron.yaml:/downloads/.musicload/cron.yaml
+      - ./cron.yaml:/config/cron.yaml:ro
     environment:
       MUSICLOAD_DOWNLOAD_DIR: /downloads
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
       MUSICLOAD_ALLOW_UGC: "false"
-      MUSICLOAD_CRON_CONFIG: /downloads/.musicload/cron.yaml
       # MUSICLOAD_DATA_DIR: /downloads/.musicload
       # GOTIFY_URL: https://gotify.example.com
       # GOTIFY_TOKEN: your-app-token
