@@ -31,6 +31,10 @@ from musicload.yt_dlp_wrapper import extract_info_with_retry
 app = FastAPI(title="Musicload", description="Search and download music from YouTube Music")
 logger = logging.getLogger(__name__)
 
+from musicload.web.logs import install_web_log_handler
+
+install_web_log_handler()
+
 # Configure CORS
 config = get_config()
 app.add_middleware(
@@ -374,6 +378,9 @@ async def index(request: Request):
             "version": __version__,
             "auth_enabled": bool(config.navidrome_url),
             "auth_user": request.session.get("username") if config.navidrome_url else None,
+            "can_view_logs": (
+                bool(request.session.get("is_admin")) if config.navidrome_url else True
+            ),
         },
     )
 
@@ -434,6 +441,29 @@ async def api_auth_status(request: Request):
         "authenticated": bool(request.session.get("username")),
         "username": request.session.get("username"),
         "is_admin": bool(request.session.get("is_admin")),
+    }
+
+
+@app.get("/api/logs")
+async def api_logs(
+    request: Request,
+    limit: int = Query(200, ge=1, le=500),
+    level: str = Query("INFO"),
+):
+    """Return recent application logs to Navidrome administrators."""
+    if config.navidrome_url and not request.session.get("is_admin"):
+        raise HTTPException(status_code=403, detail="Administrator access required")
+
+    minimum_level = getattr(logging, level.upper(), None)
+    if not isinstance(minimum_level, int):
+        raise HTTPException(status_code=422, detail="Invalid log level")
+
+    from musicload.web.logs import web_log_handler
+
+    return {
+        "logs": web_log_handler.recent(limit, minimum_level),
+        "limit": limit,
+        "level": level.upper(),
     }
 
 

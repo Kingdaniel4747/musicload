@@ -744,6 +744,37 @@ header p {
     text-align: center;
 }
 
+.login-provider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 0.3rem;
+}
+
+.login-provider span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.login-provider img {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.icon-btn svg {
+    width: 1.15rem;
+    height: 1.15rem;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.9;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
 .login-form {
     display: grid;
     gap: 1rem;
@@ -779,6 +810,87 @@ header p {
     min-height: 1.25rem;
     color: var(--error-text);
     font-size: 0.9rem;
+}
+
+/* Application log tab */
+.logs-section {
+    padding-bottom: 2rem;
+}
+
+.logs-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+
+.logs-header p,
+.logs-empty {
+    margin-top: 0.3rem;
+    color: var(--text-secondary);
+}
+
+.logs-controls {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.logs-controls select {
+    padding: 0.55rem 0.7rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.5rem;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.logs-list {
+    display: grid;
+    gap: 0.55rem;
+}
+
+.log-row {
+    padding: 0.8rem;
+    border-left: 3px solid var(--border-color);
+    border-radius: 0.45rem;
+    background: var(--bg-secondary);
+}
+
+.log-row.log-warning {
+    border-left-color: #f59e0b;
+}
+
+.log-row.log-error,
+.log-row.log-critical {
+    border-left-color: #ef4444;
+}
+
+.log-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-bottom: 0.45rem;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+}
+
+.log-level {
+    color: var(--text-primary);
+    font-weight: 700;
+}
+
+.log-row pre {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+    color: var(--text-primary);
+    font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+@media (max-width: 640px) {
+    .logs-header {
+        flex-direction: column;
+    }
 }
 
 /* Final interface polish: dark-only UI, clearer local actions, and in-app confirmations. */
@@ -2333,6 +2445,9 @@ header h1 .version, header p { display: none; }
         border-top: 1px solid var(--border-color);
         background: rgba(15, 16, 19, 0.96);
         backdrop-filter: blur(16px);
+    }
+    .mobile-nav.mobile-nav-five {
+        grid-template-columns: repeat(5, 1fr);
     }
     .mobile-nav-btn {
         display: flex;

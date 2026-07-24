@@ -73,10 +73,19 @@
             >
               🍪
             </button>
+            {% if can_view_logs %}
+            <button id="logs-btn" class="icon-btn" type="button" aria-label="Logs" title="Application logs">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 4h14M5 8h14M5 12h9M5 16h14M5 20h9" />
+              </svg>
+            </button>
+            {% endif %}
             {% if auth_enabled %}
             <form action="/api/auth/logout" method="post" class="logout-form">
               <button class="icon-btn" type="submit" aria-label="Sign out" title="Sign out ({{ auth_user }})">
-                &#x21AA;
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M10 5H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h4M14 8l4 4-4 4M9 12h9" />
+                </svg>
               </button>
             </form>
             {% endif %}
@@ -131,6 +140,27 @@
       <div id="albums-results" class="albums-grid"></div>
       <div id="explore-results" class="explore-section active"></div>
       <div id="library-results" class="explore-section"></div>
+      {% if can_view_logs %}
+      <div id="logs-results" class="explore-section logs-section">
+        <div class="logs-header">
+          <div>
+            <h2>Application logs</h2>
+            <p>Recent messages from the Musicload web process.</p>
+          </div>
+          <div class="logs-controls">
+            <select id="logs-level" aria-label="Minimum log level">
+              <option value="DEBUG">Debug</option>
+              <option value="INFO" selected>Info</option>
+              <option value="WARNING">Warning</option>
+              <option value="ERROR">Error</option>
+            </select>
+            <button id="logs-refresh" type="button" class="btn">Refresh</button>
+          </div>
+        </div>
+        <div id="logs-status" class="status"></div>
+        <div id="logs-list" class="logs-list"></div>
+      </div>
+      {% endif %}
     </div>
 
     <div id="mini-player" class="mini-player" hidden>
@@ -142,7 +172,7 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
-    <nav class="mobile-nav" aria-label="Main navigation">
+    <nav class="mobile-nav{% if can_view_logs %} mobile-nav-five{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon">⌕</span><span>Explore</span>
       </button>
@@ -155,6 +185,11 @@
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
         <span class="mobile-nav-icon">↓</span><span>Downloads</span>
       </button>
+      {% if can_view_logs %}
+      <button class="mobile-nav-btn" data-mobile-tab="logs" aria-label="Logs">
+        <span class="mobile-nav-icon">&#9776;</span><span>Logs</span>
+      </button>
+      {% endif %}
     </nav>
 
     <!-- Cookies Modal -->
@@ -422,6 +457,7 @@
       const songsResults = document.getElementById("songs-results");
       const albumsResults = document.getElementById("albums-results");
       const libraryResults = document.getElementById("library-results");
+      const logsResults = document.getElementById("logs-results");
       let libraryLoaded = false;
       let libraryTracks = [];
       let libraryOffset = 0;
@@ -438,6 +474,7 @@
           albums: "Search albums or paste a URL...",
           library: "Search local files...",
           downloads: "Search downloads...",
+          logs: "Application logs",
         };
         searchInput.placeholder = placeholders[currentTab] || placeholders.explore;
       }
@@ -470,6 +507,20 @@
         setActiveTab("downloads");
         updateUrlParams("", "downloads");
       });
+
+      const logsButton = document.getElementById("logs-btn");
+      if (logsButton) {
+        logsButton.addEventListener("click", () => {
+          exitAlbumViewMode();
+          setActiveTab("logs");
+          updateUrlParams("", "logs");
+        });
+        document.getElementById("logs-refresh").addEventListener("click", loadLogs);
+        document.getElementById("logs-level").addEventListener("change", loadLogs);
+        window.setInterval(() => {
+          if (currentTab === "logs") loadLogs(true);
+        }, 5000);
+      }
 
       document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
@@ -725,6 +776,52 @@
       const downloadsResults = document.getElementById("downloads-results");
       const resultTypeToggle = document.getElementById("result-type-toggle");
 
+      async function loadLogs(silent = false) {
+        if (!logsResults) return;
+        const status = document.getElementById("logs-status");
+        const list = document.getElementById("logs-list");
+        const level = document.getElementById("logs-level").value;
+        if (!silent) status.textContent = "Loading logs...";
+        try {
+          const response = await fetch(`/api/logs?limit=300&level=${encodeURIComponent(level)}`);
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Could not load logs.");
+          list.replaceChildren();
+          if (!data.logs.length) {
+            const empty = document.createElement("p");
+            empty.className = "logs-empty";
+            empty.textContent = "No matching log messages yet.";
+            list.appendChild(empty);
+          } else {
+            data.logs.slice().reverse().forEach((entry) => {
+              const row = document.createElement("div");
+              row.className = `log-row log-${entry.level.toLowerCase()}`;
+              const meta = document.createElement("div");
+              meta.className = "log-meta";
+              const time = document.createElement("time");
+              time.dateTime = entry.timestamp;
+              time.textContent = new Date(entry.timestamp).toLocaleString();
+              const levelLabel = document.createElement("span");
+              levelLabel.className = "log-level";
+              levelLabel.textContent = entry.level;
+              const loggerName = document.createElement("span");
+              loggerName.className = "log-logger";
+              loggerName.textContent = entry.logger;
+              meta.append(time, levelLabel, loggerName);
+              const message = document.createElement("pre");
+              message.textContent = entry.message;
+              row.append(meta, message);
+              list.appendChild(row);
+            });
+          }
+          status.textContent = `${data.logs.length} messages · updates every 5 seconds`;
+          status.classList.remove("error");
+        } catch (error) {
+          status.textContent = error.message;
+          status.classList.add("error");
+        }
+      }
+
       function setActiveTab(tab, skipExploreLoad = false) {
         currentTab = tab;
         updateSearchContext();
@@ -744,6 +841,7 @@
         exploreResults.classList.remove("active");
         libraryResults.classList.remove("active");
         downloadsResults.classList.remove("active");
+        if (logsResults) logsResults.classList.remove("active");
 
         // Suche ist jetzt immer nutzbar, auch im Explore-Zustand
         searchInput.disabled = false;
@@ -773,6 +871,10 @@
           downloadsResults.classList.add("active");
           resultTypeToggle.style.display = "none";
           updateQueueUI(queueJobs);
+        } else if (tab === "logs" && logsResults) {
+          logsResults.classList.add("active");
+          resultTypeToggle.style.display = "none";
+          loadLogs();
         }
       }
 
@@ -2048,7 +2150,6 @@
                                 <option value="CA" ${chartsCountry === "CA" ? "selected" : ""}>Canada</option>
                             </select>
                             ${chartTracks.length > 0 ? '<button class="download-all-btn" id="download-all-charts">Download All</button>' : ""}
-                            <button class="cron-btn" id="cron-charts-btn" data-country="${chartsCountry}" aria-label="Copy cron config" title="Copy cron.yaml config for this chart">+ Cron</button>
                         </div>
                     </div>
             `;
@@ -2104,7 +2205,6 @@
               <div class="explore-section-header">
                 <h2>New Releases</h2>
                 <div class="explore-section-actions">
-                  <button class="cron-btn" id="cron-new-releases-btn" aria-label="Copy cron config" title="Copy cron.yaml config for new releases">+ Cron</button>
                 </div>
               </div>
               <div class="new-releases-grid">
@@ -2337,7 +2437,6 @@
                     <button class="breadcrumb-link" id="breadcrumb-home">Explore</button>
                     <span class="breadcrumb-sep">›</span>
                     <span class="breadcrumb-current">${escapeHtml(categoryTitle)}</span>
-                    <button class="cron-btn cron-btn-inline" id="cron-mood-btn" data-params="${escapeHtml(params)}" data-title="${escapeHtml(categoryTitle)}" aria-label="Copy cron config" title="Copy cron.yaml config for this mood/genre">+ Cron</button>
                 </div>
                 <div class="mood-playlists-grid">
                     ${playlists
@@ -2492,7 +2591,6 @@
                     </div>
                     <div class="explore-section-actions">
                         <button class="download-all-btn" id="download-all-playlist">Download All</button>
-                        ${parentMoodParams ? `<button class="cron-btn" id="cron-playlist-btn" data-params="${escapeHtml(parentMoodParams)}" data-playlist-id="${escapeHtml(playlistId)}" data-title="${escapeHtml(playlistTitle)}" aria-label="Copy cron config" title="Copy cron.yaml config for this playlist">+ Cron</button>` : ""}
                     </div>
                 </div>
                 <div class="explore-tracks-list">
