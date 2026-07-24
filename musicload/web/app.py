@@ -15,7 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from starlette.responses import JSONResponse, RedirectResponse
 
 from musicload import __version__
 from musicload.config import get_config
@@ -62,6 +63,46 @@ static_dir = Path(__file__).parent / "static"
 
 templates = Jinja2Templates(directory=str(templates_dir))
 app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+_AUTH_PUBLIC_PATHS = {
+    "/login",
+    "/api/auth/login",
+    "/api/auth/status",
+    "/sw.js",
+}
+
+
+@app.middleware("http")
+async def require_navidrome_login(request: Request, call_next):
+    """Protect pages and APIs when Navidrome authentication is configured."""
+    if (
+        not config.navidrome_url
+        or request.url.path in _AUTH_PUBLIC_PATHS
+        or request.url.path.startswith("/static/")
+    ):
+        return await call_next(request)
+    if request.session.get("username"):
+        return await call_next(request)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"detail": "Authentication required"}, status_code=401)
+    next_path = urllib.parse.quote(request.url.path, safe="/")
+    return RedirectResponse(f"/login?next={next_path}", status_code=303)
+
+
+if config.navidrome_url:
+    if not config.session_secret or len(config.session_secret) < 32:
+        raise RuntimeError(
+            "NAVIDROME_URL requires MUSICLOAD_SESSION_SECRET with at least 32 characters"
+        )
+    from musicload.web.auth import SignedSessionMiddleware
+
+    app.add_middleware(
+        SignedSessionMiddleware,
+        secret_key=config.session_secret,
+        session_cookie="musicload_session",
+        max_age=60 * 60 * 24 * 7,
+        https_only=config.session_https_only,
+    )
 
 
 @app.get("/sw.js", include_in_schema=False)
@@ -161,6 +202,13 @@ class DownloadRequest(BaseModel):
     artist: str
     artists: list[str] | None = None
     audio_format: str = "opus"
+
+
+class LoginRequest(BaseModel):
+    """Navidrome credentials used only for the current login attempt."""
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
 
 
 class DownloadResponse(BaseModel):
@@ -319,7 +367,74 @@ class LibraryTracksResponse(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render the main search page."""
-    return templates.TemplateResponse(request=request, name="index.html", context={"version": __version__})
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "version": __version__,
+            "auth_enabled": bool(config.navidrome_url),
+            "auth_user": request.session.get("username") if config.navidrome_url else None,
+        },
+    )
+
+
+@app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+async def login_page(request: Request):
+    """Render the Navidrome login page."""
+    if not config.navidrome_url:
+        return RedirectResponse("/", status_code=303)
+    if request.session.get("username"):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(request=request, name="login.html")
+
+
+@app.post("/api/auth/login")
+async def api_login(login: LoginRequest, request: Request):
+    """Authenticate against Navidrome and create a signed local session."""
+    if not config.navidrome_url:
+        raise HTTPException(status_code=404, detail="Navidrome login is not configured")
+
+    from musicload.web.auth import (
+        AuthenticationError,
+        authenticate_navidrome,
+        check_login_rate_limit,
+        clear_login_attempts,
+    )
+
+    client = request.client.host if request.client else "unknown"
+    try:
+        check_login_rate_limit(client)
+        username = login.username.strip()
+        if not username or not login.password:
+            raise AuthenticationError("Invalid username or password.")
+        user = await authenticate_navidrome(config.navidrome_url, username, login.password)
+    except AuthenticationError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+    clear_login_attempts(client)
+    request.session.clear()
+    request.session.update({"username": user.username, "is_admin": user.is_admin})
+    return {"success": True, "username": user.username, "is_admin": user.is_admin}
+
+
+@app.post("/api/auth/logout")
+async def api_logout(request: Request):
+    """Destroy the current Musicload session."""
+    request.session.clear()
+    return RedirectResponse("/login", status_code=303)
+
+
+@app.get("/api/auth/status")
+async def api_auth_status(request: Request):
+    """Return authentication state without exposing credentials."""
+    if not config.navidrome_url:
+        return {"enabled": False, "authenticated": True}
+    return {
+        "enabled": True,
+        "authenticated": bool(request.session.get("username")),
+        "username": request.session.get("username"),
+        "is_admin": bool(request.session.get("is_admin")),
+    }
 
 
 @app.get("/api/share/resolve")

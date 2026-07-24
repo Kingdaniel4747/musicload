@@ -40,6 +40,9 @@ class Config:
     multi_user: bool = False
     replaygain: bool = False
     allow_ugc: bool = False
+    navidrome_url: str | None = None
+    session_secret: str | None = None
+    session_https_only: bool = True
 
     def effective_playlist_name(self, remote_user: str | None) -> str | None:
         """Return the playlist name, optionally prefixed with the remote user."""
@@ -157,6 +160,11 @@ class Config:
             multi_user=multi_user,
             replaygain=replaygain,
             allow_ugc=allow_ugc,
+            navidrome_url=os.getenv("NAVIDROME_URL", "").rstrip("/") or None,
+            session_secret=os.getenv("MUSICLOAD_SESSION_SECRET"),
+            session_https_only=os.getenv(
+                "MUSICLOAD_SESSION_HTTPS_ONLY", "true"
+            ).lower() in ("true", "1", "yes"),
         )
 
     @property

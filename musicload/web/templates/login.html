@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in · Musicload</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="login-page">
+    <main class="login-card">
+      <img class="login-logo" src="/static/musicload-mark.svg" alt="" />
+      <h1>Sign in to Musicload</h1>
+      <p>Use your Navidrome account.</p>
+      <form id="login-form" class="login-form">
+        <label>
+          Username
+          <input id="login-username" name="username" autocomplete="username" required autofocus />
+        </label>
+        <label>
+          Password
+          <input id="login-password" name="password" type="password" autocomplete="current-password" required />
+        </label>
+        <div id="login-error" class="login-error" role="alert"></div>
+        <button type="submit">Sign in</button>
+      </form>
+    </main>
+    <script>
+      const form = document.getElementById("login-form");
+      const errorElement = document.getElementById("login-error");
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const button = form.querySelector("button");
+        button.disabled = true;
+        errorElement.textContent = "";
+        try {
+          const response = await fetch("/api/auth/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username: document.getElementById("login-username").value,
+              password: document.getElementById("login-password").value,
+            }),
+          });
+          const result = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(result.detail || "Sign-in failed.");
+          const next = new URLSearchParams(location.search).get("next");
+          location.replace(next && next.startsWith("/") && !next.startsWith("//") ? next : "/");
+        } catch (error) {
+          errorElement.textContent = error.message;
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

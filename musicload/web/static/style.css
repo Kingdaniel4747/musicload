@@ -705,6 +705,82 @@ header p {
     }
 }
 
+/* Navidrome authentication */
+.logout-form {
+    display: contents;
+}
+
+.login-page {
+    display: grid;
+    place-items: center;
+    padding: 1.5rem;
+}
+
+.login-card {
+    width: min(100%, 26rem);
+    padding: 2rem;
+    border: 1px solid var(--border-color);
+    border-radius: 1rem;
+    background: var(--bg-secondary);
+    box-shadow: 0 1.25rem 3rem rgba(0, 0, 0, 0.3);
+}
+
+.login-logo {
+    display: block;
+    width: 3rem;
+    height: 3rem;
+    margin: 0 auto 1rem;
+}
+
+.login-card h1 {
+    color: var(--text-primary);
+    font-size: 1.65rem;
+    text-align: center;
+}
+
+.login-card > p {
+    margin: 0.5rem 0 1.5rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.login-form {
+    display: grid;
+    gap: 1rem;
+}
+
+.login-form label {
+    display: grid;
+    gap: 0.4rem;
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.login-form input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.55rem;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font: inherit;
+}
+
+.login-form input:focus {
+    border-color: var(--accent-primary);
+    outline: 2px solid color-mix(in srgb, var(--accent-primary) 35%, transparent);
+}
+
+.login-form button {
+    padding: 0.8rem;
+}
+
+.login-error {
+    min-height: 1.25rem;
+    color: var(--error-text);
+    font-size: 0.9rem;
+}
+
 /* Final interface polish: dark-only UI, clearer local actions, and in-app confirmations. */
 .library-explore-btn {
     padding-left: 1rem;

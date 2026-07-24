@@ -185,12 +185,31 @@ Musicload is a Progressive Web App (PWA). For reliable installation and Android 
 
 ## Environment options
 
+### Navidrome login
+
+Set `NAVIDROME_URL` and a random `MUSICLOAD_SESSION_SECRET` of at least 32
+characters to require a Navidrome login for the complete web interface and API.
+Musicload verifies credentials through Navidrome and never stores the password.
+Sessions use a signed, HTTP-only cookie and expire after seven days.
+
+```yaml
+NAVIDROME_URL: http://navidrome:4533
+MUSICLOAD_SESSION_SECRET: replace-with-a-long-random-secret
+MUSICLOAD_SESSION_HTTPS_ONLY: "true"
+```
+
+Keep `MUSICLOAD_SESSION_HTTPS_ONLY` enabled when Musicload is served through
+HTTPS. Set it to `false` only when accessing Musicload directly over local HTTP.
+
 All settings live directly in `docker-compose.yml`; no `.env` file is required. The defaults in the included Compose file are already suitable for most installations.
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
 | `MUSICLOAD_DATA_DIR` | `/downloads/.musicload` | State, cookies, cache, and cron history. |
+| `NAVIDROME_URL` | unset | Navidrome server used as the login provider. |
+| `MUSICLOAD_SESSION_SECRET` | unset | Secret of at least 32 characters used to sign sessions. |
+| `MUSICLOAD_SESSION_HTTPS_ONLY` | `true` | Send the session cookie only over HTTPS. |
 | `MUSICLOAD_WEB_PORT` | `8000` | Web server port inside the container. |
 | `MUSICLOAD_AUDIO_FORMAT` | `opus` | `opus`, `mp3`, or `flac`. |
 | `MUSICLOAD_ORGANIZATION_MODE` | `flat` | Use `album` for `Artist/Album/Track` folders. |

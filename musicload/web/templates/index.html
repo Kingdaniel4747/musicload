@@ -73,6 +73,13 @@
             >
               🍪
             </button>
+            {% if auth_enabled %}
+            <form action="/api/auth/logout" method="post" class="logout-form">
+              <button class="icon-btn" type="submit" aria-label="Sign out" title="Sign out ({{ auth_user }})">
+                &#x21AA;
+              </button>
+            </form>
+            {% endif %}
           </div>
         </div>
       </header>

@@ -19,6 +19,11 @@ services:
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
       MUSICLOAD_ALLOW_UGC: "false"
+      # Enable Navidrome login for the complete web interface:
+      # NAVIDROME_URL: http://navidrome:4533
+      # MUSICLOAD_SESSION_SECRET: replace-with-at-least-32-random-characters
+      # Keep true behind HTTPS. Use false only for local HTTP testing.
+      # MUSICLOAD_SESSION_HTTPS_ONLY: "true"
       # MUSICLOAD_DATA_DIR: /downloads/.musicload
       # YT_DLP_COOKIE_FILE: /cookies/cookies.txt
       # GOTIFY_URL: https://gotify.example.com
