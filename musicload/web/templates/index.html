@@ -142,23 +142,12 @@
       <div id="library-results" class="explore-section"></div>
       {% if can_view_logs %}
       <div id="logs-results" class="explore-section logs-section">
-        <div class="logs-header">
-          <div>
-            <h2>Application logs</h2>
-            <p>Recent messages from the Musicload web process.</p>
-          </div>
-          <div class="logs-controls">
-            <select id="logs-level" aria-label="Minimum log level">
-              <option value="DEBUG">Debug</option>
-              <option value="INFO" selected>Info</option>
-              <option value="WARNING">Warning</option>
-              <option value="ERROR">Error</option>
-            </select>
-            <button id="logs-refresh" type="button" class="btn">Refresh</button>
-          </div>
+        <div class="log-source-tabs" role="tablist" aria-label="Log source">
+          <button type="button" class="log-source-tab active" data-log-source="web" role="tab">Web</button>
+          <button type="button" class="log-source-tab" data-log-source="cron" role="tab">Cron</button>
         </div>
         <div id="logs-status" class="status"></div>
-        <div id="logs-list" class="logs-list"></div>
+        <pre id="logs-output" class="logs-output" aria-live="off"></pre>
       </div>
       {% endif %}
     </div>
@@ -509,17 +498,30 @@
       });
 
       const logsButton = document.getElementById("logs-btn");
+      let activeLogSource = "web";
+      const logOffsets = { web: 0, cron: 0 };
+      const logContents = { web: "", cron: "" };
+      let logsLoading = false;
       if (logsButton) {
         logsButton.addEventListener("click", () => {
           exitAlbumViewMode();
           setActiveTab("logs");
           updateUrlParams("", "logs");
         });
-        document.getElementById("logs-refresh").addEventListener("click", loadLogs);
-        document.getElementById("logs-level").addEventListener("change", loadLogs);
+        document.querySelectorAll(".log-source-tab").forEach((button) => {
+          button.addEventListener("click", () => {
+            activeLogSource = button.dataset.logSource;
+            document.querySelectorAll(".log-source-tab").forEach((tab) => {
+              tab.classList.toggle("active", tab === button);
+            });
+            document.getElementById("logs-output").textContent =
+              logContents[activeLogSource];
+            loadLogs();
+          });
+        });
         window.setInterval(() => {
           if (currentTab === "logs") loadLogs(true);
-        }, 5000);
+        }, 1000);
       }
 
       document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
@@ -777,48 +779,38 @@
       const resultTypeToggle = document.getElementById("result-type-toggle");
 
       async function loadLogs(silent = false) {
-        if (!logsResults) return;
+        if (!logsResults || logsLoading) return;
+        logsLoading = true;
+        const source = activeLogSource;
         const status = document.getElementById("logs-status");
-        const list = document.getElementById("logs-list");
-        const level = document.getElementById("logs-level").value;
+        const output = document.getElementById("logs-output");
         if (!silent) status.textContent = "Loading logs...";
         try {
-          const response = await fetch(`/api/logs?limit=300&level=${encodeURIComponent(level)}`);
-          const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.detail || "Could not load logs.");
-          list.replaceChildren();
-          if (!data.logs.length) {
-            const empty = document.createElement("p");
-            empty.className = "logs-empty";
-            empty.textContent = "No matching log messages yet.";
-            list.appendChild(empty);
-          } else {
-            data.logs.slice().reverse().forEach((entry) => {
-              const row = document.createElement("div");
-              row.className = `log-row log-${entry.level.toLowerCase()}`;
-              const meta = document.createElement("div");
-              meta.className = "log-meta";
-              const time = document.createElement("time");
-              time.dateTime = entry.timestamp;
-              time.textContent = new Date(entry.timestamp).toLocaleString();
-              const levelLabel = document.createElement("span");
-              levelLabel.className = "log-level";
-              levelLabel.textContent = entry.level;
-              const loggerName = document.createElement("span");
-              loggerName.className = "log-logger";
-              loggerName.textContent = entry.logger;
-              meta.append(time, levelLabel, loggerName);
-              const message = document.createElement("pre");
-              message.textContent = entry.message;
-              row.append(meta, message);
-              list.appendChild(row);
-            });
+          let eof = false;
+          while (!eof) {
+            const response = await fetch(
+              `/api/logs/${source}?offset=${logOffsets[source]}`
+            );
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || "Could not load logs.");
+            logContents[source] += data.content || "";
+            logOffsets[source] = data.next_offset;
+            eof = data.eof;
           }
-          status.textContent = `${data.logs.length} messages · updates every 5 seconds`;
+          if (activeLogSource === source) {
+            const followTail =
+              output.scrollHeight - output.scrollTop - output.clientHeight < 80 ||
+              !output.textContent;
+            output.textContent = logContents[source];
+            if (followTail) output.scrollTop = output.scrollHeight;
+          }
+          status.textContent = "";
           status.classList.remove("error");
         } catch (error) {
           status.textContent = error.message;
           status.classList.add("error");
+        } finally {
+          logsLoading = false;
         }
       }
 
@@ -848,6 +840,8 @@
         document.getElementById("search-clear-btn").disabled = false;
         document.querySelector("#search-form button[type='submit']").disabled = false;
         document.getElementById("search-form").classList.remove("search-disabled");
+        document.getElementById("search-form").style.display =
+          tab === "logs" ? "none" : "";
 
         if (tab === "songs") {
           songsResults.classList.add("active");

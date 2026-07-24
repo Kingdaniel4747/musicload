@@ -817,80 +817,45 @@ header p {
     padding-bottom: 2rem;
 }
 
-.logs-header {
+.log-source-tabs {
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1rem;
+    gap: 0.35rem;
+    margin-bottom: 0.7rem;
 }
 
-.logs-header p,
-.logs-empty {
-    margin-top: 0.3rem;
-    color: var(--text-secondary);
-}
-
-.logs-controls {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.logs-controls select {
-    padding: 0.55rem 0.7rem;
-    border: 1px solid var(--border-color);
-    border-radius: 0.5rem;
-    background: var(--bg-secondary);
-    color: var(--text-primary);
-}
-
-.logs-list {
-    display: grid;
-    gap: 0.55rem;
-}
-
-.log-row {
-    padding: 0.8rem;
-    border-left: 3px solid var(--border-color);
-    border-radius: 0.45rem;
-    background: var(--bg-secondary);
-}
-
-.log-row.log-warning {
-    border-left-color: #f59e0b;
-}
-
-.log-row.log-error,
-.log-row.log-critical {
-    border-left-color: #ef4444;
-}
-
-.log-meta {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0.6rem;
-    margin-bottom: 0.45rem;
-    color: var(--text-secondary);
-    font-size: 0.78rem;
-}
-
-.log-level {
-    color: var(--text-primary);
+.log-source-tab {
+    padding: 0.55rem 1.2rem;
+    border: 1px solid #30343b;
+    border-radius: 0.4rem;
+    background: #17191d;
+    color: #a7adb7;
     font-weight: 700;
 }
 
-.log-row pre {
-    overflow-wrap: anywhere;
-    white-space: pre-wrap;
-    color: var(--text-primary);
-    font: 0.82rem/1.45 ui-monospace, SFMono-Regular, Consolas, monospace;
+.log-source-tab.active {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary);
+    color: #fff;
 }
 
-@media (max-width: 640px) {
-    .logs-header {
-        flex-direction: column;
-    }
+.logs-output {
+    width: 100%;
+    height: min(72vh, 52rem);
+    margin: 0;
+    padding: 1rem;
+    overflow: auto;
+    border: 1px solid #30343b;
+    border-radius: 0.45rem;
+    background: #090a0c;
+    color: #e6e8eb;
+    tab-size: 4;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font: 0.78rem/1.48 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+}
+
+body:has(#logs-results.active) .container {
+    max-width: 1400px;
 }
 
 /* Final interface polish: dark-only UI, clearer local actions, and in-app confirmations. */

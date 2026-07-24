@@ -31,10 +31,6 @@ from musicload.yt_dlp_wrapper import extract_info_with_retry
 app = FastAPI(title="Musicload", description="Search and download music from YouTube Music")
 logger = logging.getLogger(__name__)
 
-from musicload.web.logs import install_web_log_handler
-
-install_web_log_handler()
-
 # Configure CORS
 config = get_config()
 app.add_middleware(
@@ -444,26 +440,23 @@ async def api_auth_status(request: Request):
     }
 
 
-@app.get("/api/logs")
+@app.get("/api/logs/{source}")
 async def api_logs(
+    source: str,
     request: Request,
-    limit: int = Query(200, ge=1, le=500),
-    level: str = Query("INFO"),
+    offset: int = Query(0, ge=0),
 ):
-    """Return recent application logs to Navidrome administrators."""
+    """Return raw incremental web or cron log output."""
     if config.navidrome_url and not request.session.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
+    if source not in {"web", "cron"}:
+        raise HTTPException(status_code=404, detail="Unknown log source")
 
-    minimum_level = getattr(logging, level.upper(), None)
-    if not isinstance(minimum_level, int):
-        raise HTTPException(status_code=422, detail="Invalid log level")
-
-    from musicload.web.logs import web_log_handler
+    from musicload.web.logs import read_log_chunk
 
     return {
-        "logs": web_log_handler.recent(limit, minimum_level),
-        "limit": limit,
-        "level": level.upper(),
+        "source": source,
+        **read_log_chunk(config.data_dir / "logs" / f"{source}.log", offset),
     }
 
 

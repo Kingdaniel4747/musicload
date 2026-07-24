@@ -1,50 +1,42 @@
-"""Bounded in-memory log feed for the authenticated web interface."""
+"""Persistent process logs shared by the web and cron containers."""
 
 import logging
-from collections import deque
-from datetime import datetime, timezone
-from threading import Lock
+from pathlib import Path
 
 
-class WebLogHandler(logging.Handler):
-    """Keep recent application log records without growing indefinitely."""
-
-    def __init__(self, capacity: int = 500):
-        super().__init__()
-        self._records: deque[dict] = deque(maxlen=capacity)
-        self._lock = Lock()
-
-    def emit(self, record: logging.LogRecord) -> None:
-        try:
-            item = {
-                "timestamp": datetime.fromtimestamp(
-                    record.created, tz=timezone.utc
-                ).isoformat(),
-                "level": record.levelname,
-                "logger": record.name,
-                "message": self.format(record)[:4000],
-            }
-            with self._lock:
-                self._records.append(item)
-        except Exception:
-            self.handleError(record)
-
-    def recent(self, limit: int, minimum_level: int) -> list[dict]:
-        with self._lock:
-            records = list(self._records)
-        filtered = [
-            item
-            for item in records
-            if getattr(logging, item["level"], 0) >= minimum_level
-        ]
-        return filtered[-limit:]
+_FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 
-web_log_handler = WebLogHandler()
-web_log_handler.setFormatter(logging.Formatter("%(message)s"))
-
-
-def install_web_log_handler() -> None:
+def configure_process_file_logging(path: Path) -> None:
+    """Append all Python logging output to a persistent process log."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    resolved = path.resolve()
     root = logging.getLogger()
-    if web_log_handler not in root.handlers:
-        root.addHandler(web_log_handler)
+    for handler in root.handlers:
+        if isinstance(handler, logging.FileHandler):
+            if Path(handler.baseFilename).resolve() == resolved:
+                return
+
+    handler = logging.FileHandler(path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter(_FORMAT))
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+
+
+def read_log_chunk(path: Path, offset: int, chunk_size: int = 512 * 1024) -> dict:
+    """Read a bounded raw-text chunk while preserving byte offsets."""
+    if not path.exists():
+        return {"content": "", "next_offset": 0, "eof": True}
+
+    size = path.stat().st_size
+    if offset > size:
+        offset = 0
+    with path.open("rb") as log_file:
+        log_file.seek(offset)
+        content = log_file.read(chunk_size)
+        next_offset = log_file.tell()
+    return {
+        "content": content.decode("utf-8", errors="replace"),
+        "next_offset": next_offset,
+        "eof": next_offset >= size,
+    }

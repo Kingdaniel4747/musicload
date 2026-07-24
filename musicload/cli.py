@@ -899,21 +899,16 @@ def web(
     config = get_config()
     server_port = port or config.web_port
 
-    typer.echo(f"Starting web server at http://{host}:{server_port}")
+    from musicload.web.logs import configure_process_file_logging
 
-    # Configure musicload loggers to match uvicorn's colored format
-    from uvicorn.logging import DefaultFormatter
-
-    musicload_logger = logging.getLogger("musicload")
-    musicload_logger.setLevel(logging.INFO)
-    musicload_logger.propagate = False
-    handler = logging.StreamHandler()
-    handler.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s"))
-    musicload_logger.addHandler(handler)
+    configure_process_file_logging(config.data_dir / "logs" / "web.log")
+    logging.getLogger(__name__).info(
+        "Starting web server at http://%s:%s", host, server_port
+    )
 
     from musicload.web.app import app as web_app
 
-    uvicorn.run(web_app, host=host, port=server_port)
+    uvicorn.run(web_app, host=host, port=server_port, log_config=None)
 
 
 # Entry point for pyproject.toml console_scripts

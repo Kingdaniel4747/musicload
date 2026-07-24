@@ -122,9 +122,13 @@ def cron_command(
     config_path = Path(config)
     download_dir = output
 
+    main_config = get_config()
+    from musicload.web.logs import configure_process_file_logging
+
+    configure_process_file_logging(main_config.data_dir / "logs" / "cron.log")
+
     # If download_dir not specified, use config default
     if not download_dir:
-        main_config = get_config()
         download_dir = main_config.download_dir
 
     try:
@@ -132,25 +136,25 @@ def cron_command(
 
         if once:
             # Run all sync jobs once and exit
-            typer.echo("Running all sync jobs once...")
+            logger.info("Running all sync jobs once...")
             scheduler.sync_all_once()
-            typer.echo("Done.")
+            logger.info("Done.")
         else:
             # Run continuously
-            typer.echo(f"Starting cron scheduler with config: {config_path}")
-            typer.echo(f"Download directory: {download_dir}")
+            logger.info("Starting cron scheduler with config: %s", config_path)
+            logger.info("Download directory: %s", download_dir)
             scheduler.run_forever()
 
     except FileNotFoundError as e:
-        typer.echo(f"Error: {e}", err=True)
+        logger.error("Error: %s", e)
         raise typer.Exit(code=1)
     except ValueError as e:
-        typer.echo(f"Error: Configuration error: {e}", err=True)
+        logger.error("Error: Configuration error: %s", e)
         raise typer.Exit(code=1)
     except KeyboardInterrupt:
         typer.echo("\nStopping...")
     except typer.Exit:
         raise
     except Exception as e:
-        typer.echo(f"Error: Unexpected error: {e}", err=True)
+        logger.exception("Error: Unexpected error: %s", e)
         raise typer.Exit(code=1)
