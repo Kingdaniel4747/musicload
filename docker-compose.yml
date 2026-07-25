@@ -7,7 +7,7 @@ services:
     volumes:
       # Change only the path on the left to your music folder or NAS path.
       - ./music/folder:/downloads
-      - ./.musicload:/downloads/.musicload
+      - ./.musicload:/data
     environment:
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
@@ -31,7 +31,7 @@ services:
     command: ["musicload", "cron", "--config", "/config/cron.yaml"]
     volumes:
       - ./music/folder:/downloads
-      - ./.musicload:/downloads/.musicload
+      - ./.musicload:/data
       - ./cron.yaml:/config/cron.yaml:ro
     environment:
       MUSICLOAD_AUDIO_FORMAT: opus
