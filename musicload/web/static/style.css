@@ -21,6 +21,10 @@
     padding: 0;
 }
 
+[hidden] {
+    display: none !important;
+}
+
 body {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     background: var(--bg-primary);
@@ -2413,6 +2417,9 @@ header h1 .version, header p { display: none; }
     }
     .mobile-nav.mobile-nav-five {
         grid-template-columns: repeat(5, 1fr);
+    }
+    .mobile-nav.mobile-nav-three {
+        grid-template-columns: repeat(3, 1fr);
     }
     .mobile-nav-btn {
         display: flex;

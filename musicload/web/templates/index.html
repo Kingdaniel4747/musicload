@@ -53,6 +53,7 @@
               class="icon-btn"
               aria-label="Local Library"
               title="Local Files"
+              {% if not is_admin %}hidden{% endif %}
             >
               📁
             </button>
@@ -70,6 +71,7 @@
               class="icon-btn"
               aria-label="Cookies"
               title="Cookies"
+              {% if not is_admin %}hidden{% endif %}
             >
               🍪
             </button>
@@ -161,14 +163,14 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
-    <nav class="mobile-nav{% if can_view_logs %} mobile-nav-five{% endif %}" aria-label="Main navigation">
+    <nav class="mobile-nav{% if is_admin %} mobile-nav-five{% else %} mobile-nav-three{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon">⌕</span><span>Explore</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="search" aria-label="Search">
         <span class="mobile-nav-icon">⌕</span><span>Search</span>
       </button>
-      <button class="mobile-nav-btn" data-mobile-tab="library" aria-label="Library">
+      <button class="mobile-nav-btn" data-mobile-tab="library" aria-label="Library" {% if not is_admin %}hidden{% endif %}>
         <span class="mobile-nav-icon">▣</span><span>Library</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
@@ -246,6 +248,8 @@
     </div>
 
     <script>
+      const isAdmin = {{ is_admin | tojson }};
+
       if ("serviceWorker" in navigator) {
         window.addEventListener("load", () => {
           navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((error) => {
@@ -1680,7 +1684,7 @@
                     `;
             }
 
-            if (job.status === "completed" || job.status === "failed") {
+            if (isAdmin && (job.status === "completed" || job.status === "failed")) {
               actionsHtml += `
                         <button class="clear-job-btn" data-job-id="${job.id}">Delete</button>
                     `;

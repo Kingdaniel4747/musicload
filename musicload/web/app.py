@@ -4,6 +4,7 @@ import asyncio
 import html
 import json
 import logging
+import mimetypes
 import re
 import urllib.parse
 from pathlib import Path
@@ -367,6 +368,7 @@ class LibraryTracksResponse(BaseModel):
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     """Render the main search page."""
+    is_admin = not config.navidrome_url or bool(request.session.get("is_admin"))
     return templates.TemplateResponse(
         request=request,
         name="index.html",
@@ -374,9 +376,8 @@ async def index(request: Request):
             "version": __version__,
             "auth_enabled": bool(config.navidrome_url),
             "auth_user": request.session.get("username") if config.navidrome_url else None,
-            "can_view_logs": (
-                bool(request.session.get("is_admin")) if config.navidrome_url else True
-            ),
+            "is_admin": is_admin,
+            "can_view_logs": is_admin,
         },
     )
 
@@ -438,6 +439,16 @@ async def api_auth_status(request: Request):
         "username": request.session.get("username"),
         "is_admin": bool(request.session.get("is_admin")),
     }
+
+
+def _is_admin(request: Request) -> bool:
+    """Treat authentication-disabled installations as fully administrative."""
+    return not config.navidrome_url or bool(request.session.get("is_admin"))
+
+
+def _require_admin(request: Request) -> None:
+    if not _is_admin(request):
+        raise HTTPException(status_code=403, detail="Administrator access required")
 
 
 @app.get("/api/logs/{source}")
@@ -1179,10 +1190,16 @@ async def list_queue_jobs():
 
 
 @app.delete("/api/queue/{job_id}")
-async def remove_queue_job(job_id: str):
+async def remove_queue_job(job_id: str, request: Request):
     """Remove or clear a job from the queue."""
     if not queue_manager:
         raise HTTPException(status_code=500, detail="Queue manager not initialized")
+
+    job = await queue_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status.value in {"completed", "failed"}:
+        _require_admin(request)
 
     success = await queue_manager.remove_job(job_id)
     if not success:
@@ -1446,8 +1463,9 @@ async def api_image_proxy(url: str = Query(..., description="Image URL to proxy"
 
 # Cookie management endpoints
 @app.post("/api/settings/cookies/upload")
-async def upload_cookies(file: UploadFile = File(...)):
+async def upload_cookies(request: Request, file: UploadFile = File(...)):
     """Upload cookies.txt file for yt-dlp authentication."""
+    _require_admin(request)
     # Validate file
     if not file.filename.endswith('.txt'):
         raise HTTPException(status_code=400, detail="File must be a .txt file")
@@ -1500,8 +1518,9 @@ async def upload_cookies(file: UploadFile = File(...)):
 
 
 @app.get("/api/settings/cookies/status")
-async def get_cookie_status():
+async def get_cookie_status(request: Request):
     """Check if cookies are configured."""
+    _require_admin(request)
     config = get_config()
     cookie_path = config.cookie_file_path
 
@@ -1524,8 +1543,9 @@ async def get_cookie_status():
 
 
 @app.delete("/api/settings/cookies")
-async def delete_cookies():
+async def delete_cookies(request: Request):
     """Delete uploaded cookie file."""
+    _require_admin(request)
     cookie_path = get_config().data_dir / "cookies.txt"
     if cookie_path.exists():
         cookie_path.unlink()
@@ -1650,6 +1670,7 @@ async def api_playlist_tracks(http_request: Request):
 @app.delete("/api/playlist/tracks")
 async def api_playlist_remove_track(entry_path: str = Query(..., description="Exact M3U entry to remove"), http_request: Request = None):
     """Remove a track entry from the playlist (does not delete the audio file)."""
+    _require_admin(http_request)
     config = get_config()
     remote_user = _get_remote_user(http_request, config)
     playlist_name = config.effective_playlist_name(remote_user)
@@ -1697,11 +1718,13 @@ def _resolve_library_path(entry_path: str, download_dir: Path) -> Path:
 
 @app.get("/api/library/files", response_model=LibraryTracksResponse)
 async def api_library_files(
+    request: Request,
     limit: int = Query(30, ge=1, le=200),
     offset: int = Query(0, ge=0),
     q: str = Query("", max_length=200),
 ):
     """List local audio files on disk, most recently added first."""
+    _require_admin(request)
     config = get_config()
     download_dir = config.download_dir
     loop = asyncio.get_event_loop()
@@ -1735,8 +1758,12 @@ async def api_library_files(
 
 
 @app.get("/api/library/play")
-async def api_library_play_file(entry_path: str = Query(..., description="Relative path of the audio file")):
+async def api_library_play_file(
+    request: Request,
+    entry_path: str = Query(..., description="Relative path of the audio file"),
+):
     """Stream a local audio file for playback in the browser."""
+    _require_admin(request)
     config = get_config()
     abs_path = _resolve_library_path(entry_path, config.download_dir)
     if not abs_path.exists() or not abs_path.is_file():
@@ -1748,8 +1775,12 @@ async def api_library_play_file(entry_path: str = Query(..., description="Relati
 
 
 @app.get("/api/library/thumbnail")
-async def api_library_thumbnail(entry_path: str = Query(..., description="Relative path of the audio file")):
-    """Return embedded album artwork, when the downloaded file has it."""
+async def api_library_thumbnail(
+    request: Request,
+    entry_path: str = Query(..., description="Relative path of the audio file"),
+):
+    """Return embedded artwork or a conventional album-folder cover."""
+    _require_admin(request)
     config = get_config()
     abs_path = _resolve_library_path(entry_path, config.download_dir)
     if not abs_path.exists() or not abs_path.is_file():
@@ -1757,28 +1788,62 @@ async def api_library_thumbnail(entry_path: str = Query(..., description="Relati
     try:
         from mutagen import File as MutagenFile
         audio = MutagenFile(abs_path)
-        if audio is None or not audio.tags:
-            raise HTTPException(status_code=404, detail="No embedded cover")
-        for tag in audio.tags.values():
-            if hasattr(tag, "data") and getattr(tag, "mime", "").startswith("image/"):
-                return Response(content=tag.data, media_type=tag.mime)
-        for key in ("covr", "metadata_block_picture"):
-            covers = audio.tags.get(key)
-            if covers:
-                cover = covers[0] if isinstance(covers, list) else covers
-                return Response(content=bytes(cover), media_type="image/jpeg")
-    except HTTPException:
-        raise
+        if audio is not None:
+            pictures = getattr(audio, "pictures", None)
+            if pictures:
+                picture = pictures[0]
+                return Response(content=picture.data, media_type=picture.mime or "image/jpeg")
+            if audio.tags:
+                for tag in audio.tags.values():
+                    if hasattr(tag, "data") and getattr(tag, "mime", "").startswith("image/"):
+                        return Response(content=tag.data, media_type=tag.mime)
+                covers = audio.tags.get("covr")
+                if covers:
+                    cover = covers[0] if isinstance(covers, list) else covers
+                    image_format = getattr(cover, "imageformat", None)
+                    media_type = "image/png" if image_format == 14 else "image/jpeg"
+                    return Response(content=bytes(cover), media_type=media_type)
+                encoded_pictures = audio.tags.get("metadata_block_picture")
+                if encoded_pictures:
+                    import base64
+                    from mutagen.flac import Picture
+
+                    encoded = (
+                        encoded_pictures[0]
+                        if isinstance(encoded_pictures, list)
+                        else encoded_pictures
+                    )
+                    picture = Picture(base64.b64decode(encoded))
+                    return Response(
+                        content=picture.data, media_type=picture.mime or "image/jpeg"
+                    )
     except Exception:
         pass
+
+    folder_files = {
+        child.name.casefold(): child
+        for child in abs_path.parent.iterdir()
+        if child.is_file()
+    }
+    for name in (
+        "cover.jpg", "cover.jpeg", "cover.png",
+        "folder.jpg", "folder.jpeg", "folder.png",
+        "front.jpg", "front.jpeg", "front.png",
+    ):
+        cover_path = folder_files.get(name)
+        if cover_path:
+            media_type = mimetypes.guess_type(cover_path.name)[0] or "image/jpeg"
+            return FileResponse(cover_path, media_type=media_type)
     raise HTTPException(status_code=404, detail="No embedded cover")
 
 
 @app.delete("/api/library/files")
 async def api_library_delete_file(
+    request: Request,
     entry_path: str = Query(..., description="Relative path of the file to delete"),
 ):
     """Delete a local audio file from disk."""
+    _require_admin(request)
     import logging
 
     logger = logging.getLogger(__name__)
