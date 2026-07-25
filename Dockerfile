@@ -24,8 +24,8 @@ ARG UID=1000
 ARG GID=1000
 RUN groupadd -g ${GID} musicload && \
     useradd -u ${UID} -g ${GID} -m -s /usr/sbin/nologin musicload && \
-    mkdir -p /app /downloads && \
-    chown -R musicload:musicload /app /downloads
+    mkdir -p /app /data /downloads && \
+    chown -R musicload:musicload /app /data /downloads
 
 WORKDIR /app
 COPY --from=builder --chown=musicload:musicload /app/.venv /app/.venv
@@ -35,6 +35,7 @@ ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1
 
 ENV MUSICLOAD_DOWNLOAD_DIR=/downloads
+ENV MUSICLOAD_DATA_DIR=/data
 ENV MUSICLOAD_WEB_PORT=8000
 
 # Switch to non-root user

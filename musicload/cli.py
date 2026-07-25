@@ -2,8 +2,6 @@
 
 import logging
 import os
-import shutil
-from errno import EXDEV
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -50,56 +48,6 @@ explore_app = typer.Typer(help="Explore moods, genres, and charts on YouTube Mus
 app.add_typer(explore_app, name="explore")
 
 app.command(name="cron")(cron_command)
-
-
-def _move_path(src: Path, dst: Path) -> None:
-    """Move src to dst, supporting cross-filesystem migrations."""
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        src.rename(dst)
-        return
-    except OSError as exc:
-        if exc.errno != EXDEV:
-            raise
-
-    if src.is_dir():
-        shutil.copytree(src, dst)
-        shutil.rmtree(src)
-    else:
-        shutil.copy2(src, dst)
-        src.unlink()
-
-
-def _migrate_legacy_data_dir(data_dir: Path) -> None:
-    """Migrate legacy <download_dir>/.musicload into an explicit data_dir."""
-    legacy_data_dir = Path(os.getenv("MUSICLOAD_DOWNLOAD_DIR", "./downloads")) / ".musicload"
-    if legacy_data_dir.resolve() == data_dir.resolve():
-        return
-    if not legacy_data_dir.exists() or not legacy_data_dir.is_dir():
-        return
-
-    logger = logging.getLogger(__name__)
-    if data_dir.exists():
-        if not data_dir.is_dir():
-            logger.warning(
-                "Skipping legacy data migration because target is not a directory: %s",
-                data_dir,
-            )
-            return
-        if any(data_dir.iterdir()):
-            logger.info(
-                "Skipping legacy data migration because target is not empty: %s",
-                data_dir,
-            )
-            return
-        for child in legacy_data_dir.iterdir():
-            _move_path(child, data_dir / child.name)
-        legacy_data_dir.rmdir()
-        logger.info("Migrated legacy data from %s to %s", legacy_data_dir, data_dir)
-        return
-
-    _move_path(legacy_data_dir, data_dir)
-    logger.info("Migrated legacy data from %s to %s", legacy_data_dir, data_dir)
 
 
 def _version_callback(value: bool):
@@ -157,7 +105,7 @@ def main_callback(
         typer.Option(
             "--data-dir",
             envvar="MUSICLOAD_DATA_DIR",
-            help="Data directory for state, cache, and metadata files. Default: <download-dir>/.musicload",
+            help="Data directory for state, cookies, logs, cache, and metadata files. Default: ~/.musicload",
         ),
     ] = None,
     version: Annotated[
@@ -184,14 +132,6 @@ def main_callback(
     if lyrics_cache_hours is not None:
         os.environ["MUSICLOAD_LYRICS_CACHE_HOURS"] = str(lyrics_cache_hours)
     if data_dir is not None:
-        try:
-            _migrate_legacy_data_dir(data_dir)
-        except Exception as exc:
-            logging.getLogger(__name__).warning(
-                "Failed to migrate legacy data directory to %s: %s",
-                data_dir,
-                exc,
-            )
         os.environ["MUSICLOAD_DATA_DIR"] = str(data_dir)
 
 

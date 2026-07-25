@@ -130,13 +130,16 @@ class Config:
                 f"MUSICLOAD_WEB_PORT must be between 1 and 65535, got {web_port}"
             )
 
-        # Parse download directory first so data_dir can default under it
         download_dir = Path(os.getenv("MUSICLOAD_DOWNLOAD_DIR", "./downloads"))
 
-        # Parse data directory:
-        # - explicit MUSICLOAD_DATA_DIR wins
-        # - default keeps legacy location under download_dir to avoid upgrade breakage
-        data_dir = Path(os.getenv("MUSICLOAD_DATA_DIR", str(download_dir / ".musicload")))
+        # Application data is intentionally independent from downloaded music.
+        # Docker sets this to /data; native installations default to ~/.musicload.
+        configured_data_dir = os.getenv("MUSICLOAD_DATA_DIR")
+        data_dir = (
+            Path(configured_data_dir).expanduser()
+            if configured_data_dir
+            else Path.home() / ".musicload"
+        )
         data_dir.mkdir(parents=True, exist_ok=True)
 
         return cls(

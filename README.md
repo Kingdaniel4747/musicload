@@ -206,7 +206,7 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
-| `MUSICLOAD_DATA_DIR` | `/downloads/.musicload` | State, cookies, cache, and cron history. |
+| `MUSICLOAD_DATA_DIR` | `~/.musicload` (`/data` in Docker) | State, cookies, logs, cache, and cron history. Kept separate from downloaded music. |
 | `NAVIDROME_URL` | unset | Navidrome server used as the login provider. |
 | `MUSICLOAD_SESSION_SECRET` | unset | Secret of at least 32 characters used to sign sessions. |
 | `MUSICLOAD_SESSION_HTTPS_ONLY` | `true` | Send the session cookie only over HTTPS. |
