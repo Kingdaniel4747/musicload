@@ -112,7 +112,7 @@
             aria-label="Clear search"
             title="Clear search"
           >
-            ✕
+            &times;
           </button>
         </div>
         <button type="submit">Search</button>
@@ -163,7 +163,7 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
-    <nav class="mobile-nav{% if is_admin %} mobile-nav-five{% else %} mobile-nav-three{% endif %}" aria-label="Main navigation">
+    <nav class="mobile-nav{% if is_admin %} mobile-nav-four{% else %} mobile-nav-three{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon">⌕</span><span>Explore</span>
       </button>
@@ -176,11 +176,6 @@
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
         <span class="mobile-nav-icon">↓</span><span>Downloads</span>
       </button>
-      {% if can_view_logs %}
-      <button class="mobile-nav-btn" data-mobile-tab="logs" aria-label="Logs">
-        <span class="mobile-nav-icon">&#9776;</span><span>Logs</span>
-      </button>
-      {% endif %}
     </nav>
 
     <!-- Cookies Modal -->
