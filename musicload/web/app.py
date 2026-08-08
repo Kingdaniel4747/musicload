@@ -905,32 +905,55 @@ async def api_download(request: DownloadRequest, http_request: Request):
         )
 
 
+def _resolve_downloaded_file_path(file_path: str, download_dir: Path) -> Path:
+    """Resolve an absolute or relative download path and prevent traversal."""
+    requested_path = Path(urllib.parse.unquote(file_path))
+    if not requested_path.is_absolute():
+        if requested_path.parts and requested_path.parts[0] == download_dir.name:
+            requested_path = Path(*requested_path.parts[1:])
+        requested_path = download_dir / requested_path
+
+    abs_requested = requested_path.resolve()
+    try:
+        abs_requested.relative_to(download_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    return abs_requested
+
+
+def _delete_downloaded_audio_file(file_path: str) -> str:
+    """Delete one validated audio file and return its relative library path."""
+    from musicload.tagging import SUPPORTED_EXTENSIONS
+
+    download_dir = get_config().download_dir.resolve()
+    abs_path = _resolve_downloaded_file_path(file_path, download_dir)
+    if not abs_path.exists() or not abs_path.is_file():
+        raise HTTPException(status_code=404, detail="File not found")
+    if abs_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+        raise HTTPException(status_code=400, detail="Not an audio file")
+
+    try:
+        abs_path.unlink()
+    except OSError as error:
+        logger.error("Failed to delete file %s: %s", abs_path, error)
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {error}")
+
+    parent = abs_path.parent
+    try:
+        if parent != download_dir and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        pass
+    return str(abs_path.relative_to(download_dir))
+
+
 @app.get("/api/download-file/{file_path:path}")
 async def download_file(file_path: str):
     """Serve downloaded file for browser download."""
     config = get_config()
-    file_path = urllib.parse.unquote(file_path)
-    requested_path = Path(file_path)
 
     try:
-        # Normalize relative paths from different callers:
-        # - M3U entries: "Artist - Song.opus"
-        # - Queue jobs in some setups: "downloads/Artist - Song.opus"
-        # Both should resolve to config.download_dir / "<entry>"
-        if not requested_path.is_absolute():
-            download_dir_name = config.download_dir.name
-            if requested_path.parts and requested_path.parts[0] == download_dir_name:
-                requested_path = Path(*requested_path.parts[1:])
-            requested_path = config.download_dir / requested_path
-
-        abs_requested = requested_path.resolve()
-        abs_download_dir = config.download_dir.resolve()
-
-        # Security: ensure path is within download_dir
-        try:
-            abs_requested.relative_to(abs_download_dir)
-        except ValueError:
-            raise HTTPException(status_code=403, detail="Access denied")
+        abs_requested = _resolve_downloaded_file_path(file_path, config.download_dir)
 
         if not abs_requested.exists():
             raise HTTPException(status_code=404, detail="File not found")
@@ -1188,7 +1211,7 @@ async def list_queue_jobs():
 
 
 @app.delete("/api/queue/{job_id}")
-async def remove_queue_job(job_id: str, request: Request):
+async def remove_queue_job(job_id: str, request: Request, delete_file: bool = False):
     """Remove or clear a job from the queue."""
     if not queue_manager:
         raise HTTPException(status_code=500, detail="Queue manager not initialized")
@@ -1198,6 +1221,10 @@ async def remove_queue_job(job_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status.value in {"completed", "failed"}:
         _require_admin(request)
+    if delete_file:
+        if job.status.value != "completed" or not job.file_path:
+            raise HTTPException(status_code=400, detail="This job has no completed file to delete")
+        _delete_downloaded_audio_file(job.file_path)
 
     success = await queue_manager.remove_job(job_id)
     if not success:
@@ -1842,36 +1869,6 @@ async def api_library_delete_file(
 ):
     """Delete a local audio file from disk."""
     _require_admin(request)
-    import logging
-
-    logger = logging.getLogger(__name__)
-
-    config = get_config()
-    download_dir = config.download_dir
-    abs_path = _resolve_library_path(entry_path, download_dir)
-
-    if not abs_path.exists() or not abs_path.is_file():
-        raise HTTPException(status_code=404, detail="File not found")
-
-    from musicload.tagging import SUPPORTED_EXTENSIONS
-
-    if abs_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail="Not an audio file")
-
-    try:
-        abs_path.unlink()
-    except Exception as e:
-        logger.error("Failed to delete file %s: %s", abs_path, e)
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {str(e)}")
-
-    rel_entry = str(abs_path.relative_to(download_dir))
-    # Jetzt leeren Elternordner aufraeumen (Album-Modus)
-    try:
-        parent = abs_path.parent
-        if parent != download_dir and parent.exists() and not any(parent.iterdir()):
-            parent.rmdir()
-    except Exception:
-        pass
-
+    rel_entry = _delete_downloaded_audio_file(entry_path)
     logger.info("Deleted library file: %s", rel_entry)
     return {"success": True, "message": f"Deleted: {rel_entry}"}

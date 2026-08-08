@@ -64,7 +64,6 @@
               title="Downloads"
             >
               ⬇
-              <span id="downloads-badge" class="downloads-badge" hidden>0</span>
             </button>
             <button
               id="cookies-btn"
@@ -171,7 +170,7 @@
         <span class="mobile-nav-icon">▣</span><span>Library</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
-        <span class="mobile-nav-icon mobile-downloads-icon">↓<span id="mobile-downloads-badge" class="downloads-badge" hidden>0</span></span><span>Downloads</span>
+        <span class="mobile-nav-icon">↓</span><span>Downloads</span>
       </button>
     </nav>
 
@@ -572,10 +571,16 @@
         }
       }
 
+      let statusHideTimer = null;
+
       function showStatus(message, isError = false) {
+        clearTimeout(statusHideTimer);
         statusDiv.textContent = message;
         statusDiv.className = "status " + (isError ? "error" : "info");
         statusDiv.style.display = message ? "block" : "none";
+        if (message) {
+          statusHideTimer = setTimeout(() => showStatus(""), 5000);
+        }
       }
 
       function closePlaylistSearch() {
@@ -1478,11 +1483,7 @@
 
       async function handleDownload(e) {
         e.stopPropagation();
-        const btn = e.target;
-        if (btn.dataset.queueJobId) {
-          await cancelInlineDownload(btn);
-          return;
-        }
+        const btn = e.currentTarget;
         const videoId = btn.dataset.videoId;
         const title = btn.dataset.title;
         const artist = btn.dataset.artist;
@@ -1510,9 +1511,13 @@
 
           if (response.ok) {
             btn.dataset.queueJobId = data.job_id;
-            btn.classList.add("queued-download-btn");
-            btn.textContent = "Cancel";
-            btn.disabled = false;
+            renderInlineDownload(btn, {
+              id: data.job_id,
+              status: "queued",
+              progress: 0,
+              speed: "Waiting",
+              eta: "",
+            });
             showStatus(`Added to queue: ${title}`);
             await fetchQueue();
           } else {
@@ -1534,25 +1539,58 @@
       }
 
       function resetInlineDownloadButton(btn) {
+        const container = btn.closest(".inline-download-control");
         delete btn.dataset.queueJobId;
-        btn.classList.remove("queued-download-btn");
+        btn.classList.remove("inline-download-progress");
         btn.disabled = false;
         btn.textContent = btn.dataset.defaultLabel || "Download";
+        if (container) container.replaceWith(btn);
       }
 
-      async function cancelInlineDownload(btn) {
+      function progressMarkup(job) {
+        const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
+        const details = [job.speed, job.eta].filter(Boolean).join(" · ");
+        return `
+          <span class="progress-fill" style="width: ${progress}%"></span>
+          <span class="progress-text">${progress.toFixed(1)}%${details ? ` · ${escapeHtml(details)}` : ""}</span>
+        `;
+      }
+
+      function renderInlineDownload(btn, job) {
+        let container = btn.closest(".inline-download-control");
+        if (!container) {
+          container = document.createElement("span");
+          container.className = "inline-download-control";
+          btn.replaceWith(container);
+          container.appendChild(btn);
+          const cancelButton = document.createElement("button");
+          cancelButton.type = "button";
+          cancelButton.className = "inline-cancel-btn";
+          cancelButton.textContent = "Cancel";
+          cancelButton.addEventListener("click", () =>
+            cancelInlineDownload(btn, cancelButton),
+          );
+          container.appendChild(cancelButton);
+        }
+        btn.dataset.queueJobId = job.id;
+        btn.classList.add("inline-download-progress");
+        btn.disabled = true;
+        btn.innerHTML = progressMarkup(job);
+      }
+
+      async function cancelInlineDownload(btn, cancelButton) {
         const jobId = btn.dataset.queueJobId;
         if (!jobId) return;
-        btn.disabled = true;
-        btn.textContent = "Cancelling...";
+        cancelButton.disabled = true;
+        cancelButton.textContent = "Cancelling...";
         try {
           const response = await fetch(`/api/queue/${jobId}`, { method: "DELETE" });
           if (!response.ok) throw new Error("Cancellation failed");
           resetInlineDownloadButton(btn);
           showStatus("Download cancelled");
         } catch (error) {
-          btn.disabled = false;
-          btn.textContent = "Cancel";
+          cancelButton.disabled = false;
+          cancelButton.textContent = "Cancel";
           showStatus("Could not cancel the download", true);
         }
       }
@@ -1602,8 +1640,6 @@
       function updateQueueUI(jobs) {
         const queueList = document.getElementById("queue-list");
         const queueSection = document.getElementById("queue-section");
-        const downloadsBadge = document.getElementById("downloads-badge");
-        const mobileDownloadsBadge = document.getElementById("mobile-downloads-badge");
         jobs = [...jobs].sort(
           (left, right) => new Date(right.created_at) - new Date(left.created_at),
         );
@@ -1611,14 +1647,25 @@
         const activeJobs = jobs.filter((job) =>
           job.status === "queued" || job.status === "downloading",
         );
-        downloadsBadge.hidden = activeJobs.length === 0;
-        downloadsBadge.textContent = activeJobs.length;
-        mobileDownloadsBadge.hidden = activeJobs.length === 0;
-        mobileDownloadsBadge.textContent = activeJobs.length;
+        const hasActiveDownloads = activeJobs.length > 0;
+        document.getElementById("downloads-btn").classList.toggle(
+          "download-active",
+          hasActiveDownloads,
+        );
+        document
+          .querySelector('[data-mobile-tab="downloads"]')
+          .classList.toggle("download-active", hasActiveDownloads);
 
-        document.querySelectorAll(".queued-download-btn").forEach((button) => {
-          const job = jobs.find((item) => item.id === button.dataset.queueJobId);
-          if (!job || !["queued", "downloading"].includes(job.status)) {
+        document.querySelectorAll(".download-btn[data-video-id]").forEach((button) => {
+          const job = jobs.find(
+            (item) =>
+              item.id === button.dataset.queueJobId ||
+              (item.video_id === button.dataset.videoId &&
+                ["queued", "downloading"].includes(item.status)),
+          );
+          if (job && ["queued", "downloading"].includes(job.status)) {
+            renderInlineDownload(button, job);
+          } else if (button.dataset.queueJobId || button.closest(".inline-download-control")) {
             resetInlineDownloadButton(button);
           }
         });
@@ -1653,11 +1700,10 @@
             let progressHtml = "";
             let actionsHtml = "";
 
-            if (job.status === "downloading") {
+            if (job.status === "queued" || job.status === "downloading") {
               progressHtml = `
                         <div class="progress-bar">
-                            <div class="progress-fill" style="width: ${job.progress}%"></div>
-                            <span class="progress-text">${job.progress.toFixed(1)}% - ${job.speed} - ${job.eta}</span>
+                            ${progressMarkup(job)}
                         </div>
                     `;
             }
@@ -1672,7 +1718,7 @@
 
             if (isAdmin && (job.status === "completed" || job.status === "failed")) {
               actionsHtml += `
-                        <button class="clear-job-btn" data-job-id="${job.id}">Delete</button>
+                        <button class="clear-job-btn" data-job-id="${job.id}" data-delete-file="${Boolean(job.file_path)}">${job.file_path ? "Delete File" : "Clear"}</button>
                     `;
             }
 
@@ -1703,29 +1749,21 @@
           })
           .join("");
 
-        // Add clear button handlers
-        document.querySelectorAll(".clear-job-btn").forEach((btn) => {
-          btn.addEventListener("click", async (e) => {
-            const jobId = e.target.dataset.jobId;
-            await removeJob(jobId);
-          });
-        });
-        document.querySelectorAll(".cancel-job-btn").forEach((btn) => {
-          btn.addEventListener("click", async (e) => {
-            const button = e.currentTarget;
-            button.disabled = true;
-            button.textContent = "Cancelling...";
-            await removeJob(button.dataset.jobId);
-          });
-        });
       }
 
-      async function removeJob(jobId) {
+      async function removeJob(jobId, deleteFile = false) {
         try {
-          await fetch(`/api/queue/${jobId}`, { method: "DELETE" });
+          const response = await fetch(
+            `/api/queue/${jobId}?delete_file=${deleteFile}`,
+            { method: "DELETE" },
+          );
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Request failed");
+          }
         } catch (error) {
           console.error("Failed to remove job:", error);
-          showStatus("Failed to remove job", true);
+          throw error;
         }
       }
 
@@ -1775,6 +1813,33 @@
         });
       }
 
+      async function runConfirmedAction({
+        button,
+        title,
+        message,
+        actionLabel = "Delete",
+        pendingLabel = "Deleting...",
+        errorLabel = "Action failed",
+        action,
+      }) {
+        const confirmed = await askForConfirmation({ title, message, actionLabel });
+        if (!confirmed) return false;
+
+        const originalLabel = button.textContent;
+        button.disabled = true;
+        button.textContent = pendingLabel;
+        try {
+          await action();
+          return true;
+        } catch (error) {
+          showStatus(`${errorLabel}: ${error.message}`, true);
+          return false;
+        } finally {
+          button.disabled = false;
+          button.textContent = originalLabel;
+        }
+      }
+
       confirmAction.addEventListener("click", () => closeConfirmation(true));
       confirmCancel.addEventListener("click", () => closeConfirmation(false));
       confirmClose.addEventListener("click", () => closeConfirmation(false));
@@ -1784,6 +1849,39 @@
       document.addEventListener("keydown", (event) => {
         if (event.key === "Escape" && confirmModal.classList.contains("active")) {
           closeConfirmation(false);
+        }
+      });
+
+      document.getElementById("queue-list").addEventListener("click", async (event) => {
+        const clearButton = event.target.closest(".clear-job-btn");
+        if (clearButton) {
+          const deleteFile = clearButton.dataset.deleteFile === "true";
+          const title = queueJobs.find((job) => job.id === clearButton.dataset.jobId)?.title || "this download";
+          const removed = await runConfirmedAction({
+            button: clearButton,
+            title: deleteFile ? "Delete downloaded file?" : "Clear download entry?",
+            message: deleteFile
+              ? `Delete "${title}" permanently from your music folder? This cannot be undone.`
+              : `Remove "${title}" from the download history?`,
+            actionLabel: deleteFile ? "Delete File" : "Clear Entry",
+            pendingLabel: deleteFile ? "Deleting..." : "Clearing...",
+            errorLabel: deleteFile ? "Delete failed" : "Clear failed",
+            action: () => removeJob(clearButton.dataset.jobId, deleteFile),
+          });
+          if (removed) showStatus(deleteFile ? `Deleted: ${title}` : `Cleared: ${title}`);
+          return;
+        }
+
+        const cancelButton = event.target.closest(".cancel-job-btn");
+        if (cancelButton) {
+          cancelButton.disabled = true;
+          cancelButton.textContent = "Cancelling...";
+          try {
+            await removeJob(cancelButton.dataset.jobId);
+          } catch (error) {
+            cancelButton.disabled = false;
+            cancelButton.textContent = "Cancel";
+          }
         }
       });
 
@@ -1883,36 +1981,22 @@
 
       // Delete cookie file
       deleteCookieBtn.addEventListener("click", async () => {
-        const confirmed = await askForConfirmation({
+        await runConfirmedAction({
+          button: deleteCookieBtn,
           title: "Delete uploaded cookie?",
           message: "This removes the cookies.txt file stored by Musicload. You can upload a new file later.",
           actionLabel: "Delete Cookie",
-        });
-        if (!confirmed) {
-          return;
-        }
-
-        deleteCookieBtn.disabled = true;
-        deleteCookieBtn.textContent = "Deleting...";
-
-        try {
-          const response = await fetch("/api/settings/cookies", {
-            method: "DELETE",
-          });
-          const data = await response.json();
-
-          if (response.ok) {
+          errorLabel: "Failed to delete cookie file",
+          action: async () => {
+            const response = await fetch("/api/settings/cookies", {
+              method: "DELETE",
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.detail || "Delete failed");
             showStatus("Cookie file deleted successfully");
             await refreshCookieStatus();
-          } else {
-            throw new Error(data.detail || "Delete failed");
-          }
-        } catch (error) {
-          showStatus("Failed to delete cookie file: " + error.message, true);
-        } finally {
-          deleteCookieBtn.disabled = false;
-          deleteCookieBtn.textContent = "Delete Cookie File";
-        }
+          },
+        });
       });
 
       // --- Cron config generation ---
@@ -2962,41 +3046,33 @@
         const title = btn.dataset.title;
         const trackElement = btn.closest(".track");
 
-        const confirmed = await askForConfirmation({
+        await runConfirmedAction({
+          button: btn,
           title: "Delete local file?",
           message: `Delete "${title}" permanently from your music folder? This cannot be undone.`,
           actionLabel: "Delete File",
+          errorLabel: "Delete failed",
+          action: async () => {
+            if (currentPlayingButton?.dataset.entryPath === entryPath) stopCurrentAudio();
+            const res = await fetch(
+              `/api/library/files?entry_path=${encodeURIComponent(entryPath)}`,
+              { method: "DELETE" },
+            );
+            if (!res.ok) {
+              const err = await res.json().catch(() => null);
+              throw new Error(err?.detail || "Failed to delete file");
+            }
+            libraryTracks = libraryTracks.filter((t) => t.entry_path !== entryPath);
+            libraryTotal -= 1;
+            const count = libraryResults.querySelector(".explore-track-count");
+            if (count) {
+              count.textContent = `${libraryTracks.length} / ${libraryTotal} files${searchInput.value.trim() ? " matching your search" : ""}`;
+            }
+            trackElement?.classList.add("is-removing");
+            setTimeout(() => trackElement?.remove(), 220);
+            showStatus(`Deleted: ${title}`);
+          },
         });
-        if (!confirmed) {
-          return;
-        }
-
-        btn.disabled = true;
-        try {
-          if (currentPlayingButton?.dataset.entryPath === entryPath) {
-            stopCurrentAudio();
-          }
-          const res = await fetch(
-            `/api/library/files?entry_path=${encodeURIComponent(entryPath)}`,
-            { method: "DELETE" },
-          );
-          if (!res.ok) {
-            const err = await res.json().catch(() => null);
-            throw new Error(err?.detail || "Failed to delete file");
-          }
-          libraryTracks = libraryTracks.filter((t) => t.entry_path !== entryPath);
-          libraryTotal -= 1;
-          const count = libraryResults.querySelector(".explore-track-count");
-          if (count) {
-            count.textContent = `${libraryTracks.length} / ${libraryTotal} files${searchInput.value.trim() ? " matching your search" : ""}`;
-          }
-          trackElement?.classList.add("is-removing");
-          setTimeout(() => trackElement?.remove(), 220);
-          showStatus(`Deleted: ${title}`);
-        } catch (error) {
-          btn.disabled = false;
-          showStatus("Delete failed: " + error.message, true);
-        }
       }
 
       // Ganz am Ende aufrufen, damit alle let/const-Deklarationen
