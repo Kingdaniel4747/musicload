@@ -122,8 +122,6 @@
         <button class="tab-btn" data-tab="albums">Albums</button>
       </div>
 
-      <div id="status" class="status"></div>
-
       <div id="downloads-results" class="downloads-section">
         <!-- Queue Section -->
         <div id="queue-section" class="queue-section">
@@ -383,7 +381,6 @@
       const searchForm = document.getElementById("search-form");
       const searchInput = document.getElementById("search-input");
       const resultsDiv = document.getElementById("songs-results");
-      const statusDiv = document.getElementById("status");
       const searchClearBtn = document.getElementById("search-clear-btn");
       let playlistEventSource = null;
 
@@ -571,16 +568,8 @@
         }
       }
 
-      let statusHideTimer = null;
-
       function showStatus(message, isError = false) {
-        clearTimeout(statusHideTimer);
-        statusDiv.textContent = message;
-        statusDiv.className = "status " + (isError ? "error" : "info");
-        statusDiv.style.display = message ? "block" : "none";
-        if (message) {
-          statusHideTimer = setTimeout(() => showStatus(""), 5000);
-        }
+        if (isError && message) console.error(message);
       }
 
       function closePlaylistSearch() {
@@ -1398,9 +1387,6 @@
                         >
                             ▶
                         </button>
-                        <button class="copy-url-btn" data-video-id="${track.video_id}" aria-label="Copy URL" title="Copy YouTube Music URL">
-                            🔗
-                        </button>
                         <button
                             class="download-btn"
                             data-video-id="${track.video_id}"
@@ -1425,59 +1411,10 @@
           });
         });
 
-        // Add copy URL button handlers
-        document.querySelectorAll(".copy-url-btn").forEach((btn) => {
-          btn.addEventListener("click", handleCopyUrl);
-        });
-
         // Add download button handlers
         document.querySelectorAll(".download-btn").forEach((btn) => {
           btn.addEventListener("click", handleDownload);
         });
-      }
-
-      async function handleCopyUrl(e) {
-        e.stopPropagation();
-        const btn = e.target;
-        const videoId = btn.dataset.videoId;
-        const url = `https://music.youtube.com/watch?v=${videoId}`;
-        const originalText = btn.textContent;
-
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(url);
-            btn.textContent = "✓";
-            showStatus("URL copied to clipboard");
-          } else {
-            // Fallback for older browsers
-            const textarea = document.createElement("textarea");
-            textarea.value = url;
-            textarea.style.position = "fixed";
-            textarea.style.opacity = "0";
-            document.body.appendChild(textarea);
-            textarea.select();
-            const success = document.execCommand("copy");
-            document.body.removeChild(textarea);
-
-            if (success) {
-              btn.textContent = "✓";
-              showStatus("URL copied to clipboard");
-            } else {
-              throw new Error("Copy command failed");
-            }
-          }
-
-          setTimeout(() => {
-            btn.textContent = originalText;
-          }, 2000);
-        } catch (error) {
-          console.error("Failed to copy URL:", error);
-          btn.textContent = "✗";
-          showStatus("Failed to copy URL: " + error.message, true);
-          setTimeout(() => {
-            btn.textContent = originalText;
-          }, 2000);
-        }
       }
 
       async function handleDownload(e) {
@@ -2208,9 +2145,8 @@
                     <div class="chart-tracks-list">
                         ${pageTracks
                           .map(
-                            (track, idx) => `
+                            (track) => `
                             <div class="track chart-track">
-                                <span class="chart-rank">${track.rank || start + idx + 1}</span>
                                 <div class="track-main">
                                     <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy" onerror="this.style.display='none'">
                                     <div class="track-info">
@@ -2225,7 +2161,6 @@
                                 ${track.trend ? `<span class="chart-trend trend-${track.trend}">${track.trend === "up" ? "&#9650;" : track.trend === "down" ? "&#9660;" : "&#8212;"}</span>` : ""}
                                 <div class="track-actions">
                                     <button class="play-btn" data-video-id="${track.video_id}" aria-label="Play preview">&#9654;</button>
-                                    <button class="copy-url-btn" data-video-id="${track.video_id}" aria-label="Copy URL" title="Copy YouTube Music URL">&#128279;</button>
                                     <button class="download-btn" data-video-id="${track.video_id}" data-title="${escapeHtml(track.title)}" data-artist="${escapeHtml(track.artist)}">Download</button>
                                 </div>
                             </div>
@@ -2440,11 +2375,6 @@
             const videoId = e.target.dataset.videoId;
             togglePlay(videoId, e.target);
           });
-        });
-
-        // Copy URL buttons in chart tracks
-        exploreResults.querySelectorAll(".copy-url-btn").forEach((btn) => {
-          btn.addEventListener("click", handleCopyUrl);
         });
 
         // Download buttons in chart tracks
@@ -2662,7 +2592,6 @@
                     </div>
                     <div class="track-actions">
                         <button class="play-btn" data-video-id="${track.video_id}" aria-label="Play preview">&#9654;</button>
-                        <button class="copy-url-btn" data-video-id="${track.video_id}" aria-label="Copy URL" title="Copy YouTube Music URL">&#128279;</button>
                         <button class="download-btn" data-video-id="${track.video_id}" data-title="${escapeHtml(track.title)}" data-artist="${escapeHtml(track.artist)}">Download</button>
                     </div>
                 </div>
@@ -2731,11 +2660,6 @@
           });
         });
 
-        // Copy URL buttons in playlist tracks
-        exploreResults.querySelectorAll(".copy-url-btn").forEach((btn) => {
-          btn.addEventListener("click", handleCopyUrl);
-        });
-
         // Individual download buttons
         exploreResults.querySelectorAll(".download-btn").forEach((btn) => {
           btn.addEventListener("click", handleDownload);
@@ -2802,7 +2726,6 @@
             </div>
             <div class="track-actions">
               <button class="play-btn" data-video-id="${track.video_id}" aria-label="Play preview">&#9654;</button>
-              <button class="copy-url-btn" data-video-id="${track.video_id}" aria-label="Copy URL" title="Copy YouTube Music URL">&#128279;</button>
               <button class="download-btn" data-video-id="${track.video_id}" data-title="${escapeHtml(track.title)}" data-artist="${escapeHtml(track.artist)}">Download</button>
             </div>
           </div>
@@ -2831,11 +2754,6 @@
             e.stopPropagation();
             togglePlay(e.target.dataset.videoId, e.target);
           });
-        });
-
-        // Copy URL buttons
-        exploreResults.querySelectorAll(".copy-url-btn").forEach((btn) => {
-          btn.addEventListener("click", handleCopyUrl);
         });
 
         // Download buttons

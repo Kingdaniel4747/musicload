@@ -415,36 +415,6 @@ header p {
     cursor: not-allowed;
 }
 
-.copy-url-btn {
-    padding: 0;
-    font-size: 1.2rem;
-    font-weight: 600;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s;
-    min-height: 44px;
-    min-width: 44px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-}
-
-.copy-url-btn:hover:not(:disabled) {
-    background: var(--accent-primary);
-    color: white;
-    transform: scale(1.05);
-}
-
-.copy-url-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-
 .download-btn {
     padding: 0.5rem 1rem;
     font-size: 0.9rem;
@@ -686,7 +656,7 @@ header p {
         justify-content: stretch;
     }
 
-    .play-btn, .copy-url-btn {
+    .play-btn {
         flex: 0 0 auto;
     }
 
@@ -1581,15 +1551,7 @@ body:has(#logs-results.active) .container {
     color: var(--text-secondary);
 }
 
-/* Chart track: extends .track with rank number and trend indicator */
-.chart-track .chart-rank {
-    font-size: 1rem;
-    font-weight: 700;
-    min-width: 2rem;
-    text-align: center;
-    color: var(--text-secondary);
-    flex-shrink: 0;
-}
+/* Chart trend indicator */
 .chart-trend {
     font-size: 0.85rem;
     min-width: 1.5rem;
@@ -1912,11 +1874,7 @@ body:has(#logs-results.active) .container {
         min-width: 0;
     }
 
-    /* Chart track rank/trend adjustments for very small screens */
-    .chart-track .chart-rank {
-        min-width: 1.5rem;
-        font-size: 0.9rem;
-    }
+    /* Chart trend adjustments for very small screens */
     .chart-track .chart-trend {
         min-width: 1rem;
         font-size: 0.75rem;
@@ -2237,7 +2195,7 @@ header h1 .version, header p { display: none; }
 .track-artist { color: var(--text-secondary); }
 .track-meta { font-size: 0.78rem; }
 .track-actions { gap: 0.45rem; }
-.play-btn, .copy-url-btn {
+.play-btn {
     min-width: 2.45rem;
     min-height: 2.45rem;
     border: 1px solid var(--border-color);
@@ -2245,7 +2203,7 @@ header h1 .version, header p { display: none; }
     background: transparent;
     color: var(--text-primary);
 }
-.play-btn:hover:not(:disabled), .copy-url-btn:hover:not(:disabled) {
+.play-btn:hover:not(:disabled) {
     border-color: var(--accent-primary);
     background: rgba(200, 16, 46, 0.12);
     color: #fff;
@@ -2334,7 +2292,6 @@ header h1 .version, header p { display: none; }
     .track-title { -webkit-line-clamp: 1; }
     .track-artist { -webkit-line-clamp: 1; font-size: 0.82rem; }
     .track-meta { display: none; }
-    .copy-url-btn { display: none; }
     .play-btn { min-width: 2.25rem; min-height: 2.25rem; }
     .download-btn { min-width: auto; padding: 0 0.7rem; min-height: 2.25rem; font-size: 0.76rem; }
     .albums-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.7rem; }
@@ -2406,28 +2363,22 @@ header h1 .version, header p { display: none; }
 
 /* Unified action controls and persistent playback control. */
 .library-delete-btn {
-    display: inline-grid;
-    place-items: center;
-    width: 2.45rem;
-    min-width: 2.45rem;
-    height: 2.45rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto;
+    min-width: 4.6rem;
+    height: auto;
     min-height: 2.45rem;
-    padding: 0;
+    padding: 0.5rem 0.85rem;
     border: 1px solid var(--accent-primary);
     border-radius: 0.55rem;
     background: transparent;
     color: #ff526c;
     cursor: pointer;
-    font-size: 0;
+    font-size: 0.82rem;
+    font-weight: 650;
     transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
-}
-.library-delete-btn::after {
-    content: "×";
-    display: block;
-    transform: translateY(-1px);
-    font-size: 1.45rem;
-    font-weight: 400;
-    line-height: 0.9;
 }
 .library-delete-btn:hover:not(:disabled) {
     border-color: var(--accent-hover);
@@ -2517,18 +2468,6 @@ header h1 .version, header p { display: none; }
     .mobile-nav-btn.download-active { animation: none; }
 }
 
-/* Status and error messages overlay the page and never move content. */
-#status.status {
-    position: fixed;
-    z-index: 60;
-    top: max(0.8rem, env(safe-area-inset-top));
-    left: 50%;
-    width: min(34rem, calc(100vw - 1.8rem));
-    margin: 0;
-    transform: translateX(-50%);
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
-}
-
 @media (max-width: 640px) {
     .job-header {
         flex-direction: row;
@@ -2578,12 +2517,6 @@ header h1 .version, header p { display: none; }
 .mini-player-toggle:hover { background: rgba(255, 255, 255, 0.16); }
 
 @media (max-width: 720px) {
-    .library-delete-btn {
-        width: 2.25rem;
-        min-width: 2.25rem;
-        height: 2.25rem;
-        min-height: 2.25rem;
-    }
     .mini-player {
         left: auto;
         right: 1rem;
