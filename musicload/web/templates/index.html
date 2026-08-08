@@ -157,6 +157,15 @@
           </div>
           <form id="listenbrainz-settings-form" class="listenbrainz-settings-form">
             <input id="listenbrainz-username" type="text" maxlength="128" placeholder="ListenBrainz username" autocomplete="username" required>
+            <select id="listenbrainz-download-weekday" aria-label="Automatic download day">
+              <option value="0">Monday</option>
+              <option value="1">Tuesday</option>
+              <option value="2">Wednesday</option>
+              <option value="3">Thursday</option>
+              <option value="4">Friday</option>
+              <option value="5">Saturday</option>
+              <option value="6">Sunday</option>
+            </select>
             <input id="listenbrainz-download-time" type="time" value="03:00" aria-label="Automatic download time">
             <label class="listenbrainz-auto-toggle">
               <input id="listenbrainz-auto-download" type="checkbox">
@@ -483,6 +492,7 @@
       const LIBRARY_PAGE_SIZE = 30;
       let currentTab = "explore";
       let queueJobs = [];
+      let downloadAttention = false;
       let viewingAlbum = null; // Tracks current album view mode { id, title, query }
 
       function updateSearchContext() {
@@ -849,6 +859,7 @@
       function setActiveTab(tab, skipExploreLoad = false) {
         if (tab !== "listenbrainz") closeListenBrainzStream();
         currentTab = tab;
+        if (tab === "downloads") downloadAttention = false;
         updateSearchContext();
         document.querySelectorAll(".mobile-nav-btn").forEach((button) => {
           button.classList.toggle("active", button.dataset.mobileTab === tab);
@@ -875,7 +886,7 @@
         document.querySelector("#search-form button[type='submit']").disabled = false;
         document.getElementById("search-form").classList.remove("search-disabled");
         document.getElementById("search-form").style.display =
-          tab === "logs" ? "none" : "";
+          ["explore", "library"].includes(tab) ? "" : "none";
 
         if (tab === "songs") {
           songsResults.classList.add("active");
@@ -922,8 +933,12 @@
         const [hours, minutes] = listenbrainzSchedule.download_time.split(":").map(Number);
         const now = new Date();
         const next = new Date(now);
+        const currentWeekday = (now.getDay() + 6) % 7;
+        const targetWeekday = Number(listenbrainzSchedule.download_weekday ?? 0);
+        const daysAhead = (targetWeekday - currentWeekday + 7) % 7;
+        next.setDate(now.getDate() + daysAhead);
         next.setHours(hours, minutes, 0, 0);
-        if (next <= now) next.setDate(next.getDate() + 1);
+        if (next <= now) next.setDate(next.getDate() + 7);
         const seconds = Math.max(0, Math.floor((next - now) / 1000));
         const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
         const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
@@ -996,6 +1011,8 @@
           if (!response.ok) throw new Error("ListenBrainz is unavailable");
           const settings = await response.json();
           input.value = settings.username || "";
+          document.getElementById("listenbrainz-download-weekday").value =
+            String(settings.download_weekday ?? 0);
           document.getElementById("listenbrainz-download-time").value =
             settings.download_time || "03:00";
           document.getElementById("listenbrainz-auto-download").checked =
@@ -1045,7 +1062,11 @@
           event.preventDefault();
           const input = document.getElementById("listenbrainz-username");
           const button = listenbrainzSettingsForm.querySelector('button[type="submit"]');
+          const previousUsername = listenbrainzSchedule?.username || "";
+          const originalLabel = button.textContent;
           button.disabled = true;
+          button.classList.add("is-saving");
+          button.textContent = "Savingâ€¦";
           try {
             const response = await fetch("/api/listenbrainz/settings", {
               method: "PUT",
@@ -1053,18 +1074,28 @@
               body: JSON.stringify({
                 username: input.value.trim(),
                 auto_download: document.getElementById("listenbrainz-auto-download").checked,
+                download_weekday: Number(document.getElementById("listenbrainz-download-weekday").value),
                 download_time: document.getElementById("listenbrainz-download-time").value || "03:00",
                 timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
               }),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.detail || "Could not save username");
-            await loadListenBrainzContent();
+            listenbrainzSchedule = { ...listenbrainzSchedule, ...data };
+            updateListenBrainzCountdown();
+            button.classList.remove("is-saving");
+            button.classList.add("is-saved");
+            button.textContent = "Saved âœ“";
+            if (previousUsername !== data.username) await loadListenBrainzContent();
           } catch (error) {
             document.getElementById("listenbrainz-content").innerHTML =
               `<div class="listenbrainz-empty">${escapeHtml(error.message)}</div>`;
           } finally {
-            button.disabled = false;
+            window.setTimeout(() => {
+              button.disabled = false;
+              button.classList.remove("is-saving", "is-saved");
+              button.textContent = originalLabel;
+            }, 1400);
           }
         });
       }
@@ -1548,6 +1579,12 @@
           const data = await response.json();
 
           if (response.ok) {
+            if (data.track_count === 0) {
+              btn.textContent = "Download Album";
+              btn.disabled = false;
+              return;
+            }
+            if (data.track_count > 0) downloadAttention = true;
             btn.textContent = `Queued (${data.track_count})`;
             await fetchQueue();
             setTimeout(() => {
@@ -1662,6 +1699,11 @@
           const data = await response.json();
 
           if (response.ok) {
+            if (data.status === "existing") {
+              resetInlineDownloadButton(btn);
+              return;
+            }
+            downloadAttention = true;
             btn.dataset.queueJobId = data.job_id;
             renderInlineDownload(btn, {
               id: data.job_id,
@@ -1789,17 +1831,14 @@
           (left, right) => new Date(right.created_at) - new Date(left.created_at),
         );
         queueJobs = jobs;
-        const activeJobs = jobs.filter((job) =>
-          job.status === "queued" || job.status === "downloading",
-        );
-        const hasActiveDownloads = activeJobs.length > 0;
+        const shouldGlow = currentTab !== "downloads" && downloadAttention;
         document.getElementById("downloads-btn").classList.toggle(
           "download-active",
-          hasActiveDownloads,
+          shouldGlow,
         );
         document
           .querySelector('[data-mobile-tab="downloads"]')
-          .classList.toggle("download-active", hasActiveDownloads);
+          .classList.toggle("download-active", shouldGlow);
 
         document.querySelectorAll(".download-btn[data-video-id]").forEach((button) => {
           const job = jobs.find(
@@ -3008,6 +3047,9 @@
               }),
             });
             if (response.ok) {
+              const data = await response.json();
+              if (data.status === "existing") continue;
+              downloadAttention = true;
               queued++;
               await fetchQueue();
             }
@@ -3016,6 +3058,11 @@
           }
         }
 
+        if (queued === 0) {
+          btn.textContent = originalText;
+          btn.disabled = false;
+          return;
+        }
         btn.textContent = `Queued ${queued}/${tracks.length}`;
         setTimeout(() => {
           btn.textContent = originalText;

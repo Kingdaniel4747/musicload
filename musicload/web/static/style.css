@@ -2187,7 +2187,7 @@ header h1 .version, header p { display: none; }
 .track:hover {
     border-color: var(--border-hover);
     background: var(--surface-raised);
-    transform: translateY(-1px);
+    transform: none;
     box-shadow: 0 12px 28px rgba(0,0,0,0.16);
 }
 .track.is-playing { box-shadow: 0 0 0 1px var(--accent-primary), 0 14px 32px rgba(200, 16, 46, 0.18); }
@@ -2230,7 +2230,7 @@ header h1 .version, header p { display: none; }
 
 .albums-grid { grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 1rem; }
 .album-card { overflow: hidden; }
-.album-card:hover { border-color: var(--border-hover); transform: translateY(-3px); box-shadow: 0 16px 32px rgba(0,0,0,0.18); }
+.album-card:hover { border-color: var(--border-hover); transform: none; box-shadow: 0 16px 32px rgba(0,0,0,0.18); }
 .album-cover { border-radius: 0; }
 .album-info { padding: 0.85rem; }
 .album-title { font-size: 0.94rem; }
@@ -2575,7 +2575,8 @@ header h1 .version, header p { display: none; }
     flex: 0 1 28rem;
     gap: 0.5rem;
 }
-.listenbrainz-settings-form input {
+.listenbrainz-settings-form input,
+.listenbrainz-settings-form select {
     min-width: 0;
     min-height: 2.45rem;
     flex: 1;
@@ -2586,6 +2587,7 @@ header h1 .version, header p { display: none; }
     color: var(--text-primary);
 }
 .listenbrainz-settings-form input[type="text"] { flex: 1; }
+.listenbrainz-settings-form select { flex: 0 0 7.2rem; }
 .listenbrainz-settings-form input[type="time"] { flex: 0 0 7.2rem; }
 .listenbrainz-auto-toggle {
     display: inline-flex;
@@ -2610,6 +2612,26 @@ header h1 .version, header p { display: none; }
     cursor: pointer;
     font-weight: 650;
 }
+.listenbrainz-settings-form button.is-saving {
+    cursor: wait;
+    background: rgba(200, 16, 46, 0.16);
+}
+.listenbrainz-settings-form button.is-saved {
+    border-color: #35b86b;
+    background: rgba(53, 184, 107, 0.16);
+    color: #79e7a5;
+}
+
+/* Keep hover geometry stable so moving the pointer onto a control cannot retrigger hover. */
+button:hover,
+.download-file-btn:hover,
+.github-star:hover {
+    transform: none;
+}
+button:active,
+.download-file-btn:active {
+    transform: translateY(1px);
+}
 .listenbrainz-empty {
     padding: 3rem 1rem;
     color: var(--text-secondary);
@@ -2631,6 +2653,7 @@ header h1 .version, header p { display: none; }
     .listenbrainz-settings-form { flex-basis: auto; width: 100%; }
     .listenbrainz-settings-form { flex-wrap: wrap; }
     .listenbrainz-settings-form input[type="text"] { flex-basis: 100%; }
+    .listenbrainz-settings-form select { flex: 1 1 7rem; }
     .listenbrainz-settings-form input[type="time"] { flex: 1 1 7rem; }
     .listenbrainz-countdown { text-align: left; }
     .listenbrainz-playlist-heading .download-all-btn { width: 100%; }

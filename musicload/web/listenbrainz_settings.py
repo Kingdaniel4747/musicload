@@ -21,6 +21,7 @@ def _connect(data_dir: Path) -> sqlite3.Connection:
             account_name TEXT PRIMARY KEY,
             listenbrainz_username TEXT NOT NULL,
             auto_download INTEGER NOT NULL DEFAULT 0,
+            download_weekday INTEGER NOT NULL DEFAULT 0,
             download_time TEXT NOT NULL DEFAULT '03:00',
             timezone TEXT NOT NULL DEFAULT 'UTC',
             last_run_date TEXT,
@@ -42,6 +43,7 @@ def _connect(data_dir: Path) -> sqlite3.Connection:
     }
     migrations = {
         "auto_download": "INTEGER NOT NULL DEFAULT 0",
+        "download_weekday": "INTEGER NOT NULL DEFAULT 0",
         "download_time": "TEXT NOT NULL DEFAULT '03:00'",
         "timezone": "TEXT NOT NULL DEFAULT 'UTC'",
         "last_run_date": "TEXT",
@@ -74,7 +76,7 @@ def get_listenbrainz_settings(data_dir: Path, account_name: str) -> dict | None:
     connection = _connect(data_dir)
     try:
         row = connection.execute(
-            """SELECT listenbrainz_username, auto_download, download_time,
+            """SELECT listenbrainz_username, auto_download, download_weekday, download_time,
                       timezone, last_run_date, last_download_hash
                FROM listenbrainz_users WHERE account_name = ?""",
             (account_name,),
@@ -84,24 +86,25 @@ def get_listenbrainz_settings(data_dir: Path, account_name: str) -> dict | None:
         return {
             "username": row[0],
             "auto_download": bool(row[1]),
-            "download_time": row[2],
-            "timezone": row[3],
-            "last_run_date": row[4],
-            "last_download_hash": row[5],
+            "download_weekday": row[2],
+            "download_time": row[3],
+            "timezone": row[4],
+            "last_run_date": row[5],
+            "last_download_hash": row[6],
         }
     finally:
         connection.close()
 
 
 def set_listenbrainz_settings(data_dir: Path, account_name: str, settings: dict) -> None:
-    """Save username and optional daily automatic-download schedule."""
+    """Save username and optional weekly automatic-download schedule."""
     connection = _connect(data_dir)
     try:
         connection.execute(
             """
             INSERT INTO listenbrainz_users
-                (account_name, listenbrainz_username, auto_download, download_time, timezone)
-            VALUES (?, ?, ?, ?, ?)
+                (account_name, listenbrainz_username, auto_download, download_weekday, download_time, timezone)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(account_name) DO UPDATE SET
                 last_run_date = CASE
                     WHEN listenbrainz_users.listenbrainz_username != excluded.listenbrainz_username
@@ -111,6 +114,7 @@ def set_listenbrainz_settings(data_dir: Path, account_name: str, settings: dict)
                     THEN NULL ELSE listenbrainz_users.last_download_hash END,
                 listenbrainz_username = excluded.listenbrainz_username,
                 auto_download = excluded.auto_download,
+                download_weekday = excluded.download_weekday,
                 download_time = excluded.download_time,
                 timezone = excluded.timezone
             """,
@@ -118,6 +122,7 @@ def set_listenbrainz_settings(data_dir: Path, account_name: str, settings: dict)
                 account_name,
                 settings["username"],
                 int(bool(settings.get("auto_download"))),
+                int(settings.get("download_weekday", 0)),
                 settings.get("download_time") or "03:00",
                 settings.get("timezone") or "UTC",
             ),
@@ -133,7 +138,7 @@ def list_listenbrainz_settings(data_dir: Path) -> list[dict]:
     try:
         rows = connection.execute(
             """SELECT account_name, listenbrainz_username, auto_download,
-                      download_time, timezone, last_run_date, last_download_hash
+                      download_weekday, download_time, timezone, last_run_date, last_download_hash
                FROM listenbrainz_users"""
         ).fetchall()
         return [
@@ -141,10 +146,11 @@ def list_listenbrainz_settings(data_dir: Path) -> list[dict]:
                 "account_name": row[0],
                 "username": row[1],
                 "auto_download": bool(row[2]),
-                "download_time": row[3],
-                "timezone": row[4],
-                "last_run_date": row[5],
-                "last_download_hash": row[6],
+                "download_weekday": row[3],
+                "download_time": row[4],
+                "timezone": row[5],
+                "last_run_date": row[6],
+                "last_download_hash": row[7],
             }
             for row in rows
         ]

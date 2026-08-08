@@ -8,7 +8,7 @@ from datetime import datetime
 from typing import Optional
 
 from musicload.config import get_config
-from musicload.download import DownloadCancelledError, download
+from musicload.download import DownloadCancelledError, ExistingDownloadError, download
 from musicload.models.queue import DownloadJob, JobStatus
 
 logger = logging.getLogger(__name__)
@@ -79,26 +79,52 @@ class QueueManager:
         Returns:
             Job ID
         """
-        job_id = str(uuid.uuid4())
-        job = DownloadJob(
-            id=job_id,
-            video_id=video_id,
-            title=title,
-            artist=artist,
-            format=format,
-            status=JobStatus.QUEUED,
-            artists=artists,
-            playlist_name=playlist_name,
-            album=album,
-            album_artist=album_artist,
-            album_year=album_year,
-            track_number=track_number,
-        )
         async with self._jobs_lock:
+            duplicate = next(
+                (
+                    item
+                    for item in self.jobs.values()
+                    if item.video_id == video_id
+                    and item.format == format
+                    and item.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING)
+                ),
+                None,
+            )
+            if duplicate:
+                return duplicate.id
+            job_id = str(uuid.uuid4())
+            job = DownloadJob(
+                id=job_id,
+                video_id=video_id,
+                title=title,
+                artist=artist,
+                format=format,
+                status=JobStatus.QUEUED,
+                artists=artists,
+                playlist_name=playlist_name,
+                album=album,
+                album_artist=album_artist,
+                album_year=album_year,
+                track_number=track_number,
+            )
             self.jobs[job_id] = job
         await self.queue.put(job)
         logger.info("Added job to queue: %s - %s (id=%s)", artist, title, job_id)
         return job_id
+
+    async def find_active_job(self, video_id: str, format: str) -> Optional[DownloadJob]:
+        """Return an already queued/downloading copy of the requested format."""
+        async with self._jobs_lock:
+            return next(
+                (
+                    job
+                    for job in self.jobs.values()
+                    if job.video_id == video_id
+                    and job.format == format
+                    and job.status in (JobStatus.QUEUED, JobStatus.DOWNLOADING)
+                ),
+                None,
+            )
 
     async def _worker(self):
         """Background worker that processes jobs from the queue."""
@@ -179,6 +205,7 @@ class QueueManager:
                     album_year=job.album_year,
                     track_number=job.track_number,
                     should_cancel=lambda: job.id in self._cancelled_job_ids,
+                    report_existing=True,
                 ),
             )
 
@@ -193,11 +220,11 @@ class QueueManager:
                 current_job.progress = 100.0
             logger.info("Job completed: %s - %s (id=%s)", job.artist, job.title, job.id)
 
-        except DownloadCancelledError:
+        except (DownloadCancelledError, ExistingDownloadError) as error:
             async with self._jobs_lock:
                 self.jobs.pop(job.id, None)
                 self._cancelled_job_ids.discard(job.id)
-            logger.info("Cancelled download: %s - %s (id=%s)", job.artist, job.title, job.id)
+            logger.info("Download omitted: %s - %s (id=%s): %s", job.artist, job.title, job.id, error)
 
         except Exception as e:
             logger.exception("Job failed: %s - %s (id=%s): %s", job.artist, job.title, job.id, e)

@@ -221,7 +221,7 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | `MUSICLOAD_LISTENBRAINZ_WEB` | `false` | Show the optional per-account ListenBrainz tab for manually exploring and downloading Weekly Exploration recommendations. |
 
 When the ListenBrainz web tab is enabled, each signed-in user can save a separate
-ListenBrainz username and optionally enable a daily local-time download check. Matched
+ListenBrainz username and optionally enable a download check on a selected weekday and local time. Matched
 recommendations and Local Files metadata are persisted under `MUSICLOAD_DATA_DIR`, so
 they remain fast after container restarts. Automatic checks only queue a playlist when
 its matched track set has changed; the standalone cron service remains optional.

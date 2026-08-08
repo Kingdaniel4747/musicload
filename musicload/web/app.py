@@ -231,6 +231,7 @@ class ListenBrainzSettingsRequest(BaseModel):
 
     username: str = Field(min_length=1, max_length=128)
     auto_download: bool = False
+    download_weekday: int = Field(default=0, ge=0, le=6)
     download_time: str = Field(default="03:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
 
@@ -494,6 +495,7 @@ async def api_listenbrainz_settings(request: Request):
     return settings or {
         "username": None,
         "auto_download": False,
+        "download_weekday": 0,
         "download_time": "03:00",
         "timezone": "UTC",
         "last_run_date": None,
@@ -523,6 +525,7 @@ async def api_save_listenbrainz_settings(
         {
             "username": username,
             "auto_download": settings.auto_download,
+            "download_weekday": settings.download_weekday,
             "download_time": settings.download_time,
             "timezone": settings.timezone,
         },
@@ -531,6 +534,7 @@ async def api_save_listenbrainz_settings(
         "success": True,
         "username": username,
         "auto_download": settings.auto_download,
+        "download_weekday": settings.download_weekday,
         "download_time": settings.download_time,
         "timezone": settings.timezone,
     }
@@ -671,6 +675,8 @@ async def _listenbrainz_scheduler() -> None:
                     continue
                 local_date = now.date().isoformat()
                 if item["last_run_date"] == local_date:
+                    continue
+                if now.weekday() != item["download_weekday"]:
                     continue
                 if now.strftime("%H:%M") < item["download_time"]:
                     continue
@@ -1402,7 +1408,7 @@ class QueueAddAlbumRequest(BaseModel):
 class QueueAddResponse(BaseModel):
     """Response after adding a job."""
 
-    job_id: str
+    job_id: str | None = None
     status: str
 
 
@@ -1419,6 +1425,16 @@ async def add_to_queue(request: QueueAddRequest, http_request: Request):
         raise HTTPException(
             status_code=400, detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
         )
+
+    from musicload.library_index import find_existing_video
+
+    existing = await asyncio.to_thread(find_existing_video, config.data_dir, request.video_id)
+    if existing:
+        return QueueAddResponse(status="existing")
+
+    active_job = await queue_manager.find_active_job(request.video_id, audio_format)
+    if active_job:
+        return QueueAddResponse(job_id=active_job.id, status="active")
 
     job_id = await queue_manager.add_job(
         video_id=request.video_id,
@@ -1456,8 +1472,18 @@ async def add_album_to_queue(request: QueueAddAlbumRequest, http_request: Reques
                 status_code=400, detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
             )
 
+        from musicload.library_index import find_existing_video
+
         job_ids = []
         for track_number, track in enumerate(tracks, start=1):
+            existing = await asyncio.to_thread(
+                find_existing_video, config.data_dir, track.video_id
+            )
+            if existing:
+                continue
+            active_job = await queue_manager.find_active_job(track.video_id, audio_format)
+            if active_job:
+                continue
             job_id = await queue_manager.add_job(
                 video_id=track.video_id,
                 title=track.title,

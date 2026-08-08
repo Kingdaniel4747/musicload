@@ -27,6 +27,14 @@ class DownloadCancelledError(Exception):
     pass
 
 
+class ExistingDownloadError(Exception):
+    """Raised for queue downloads when the requested audio file already exists."""
+
+    def __init__(self, path: Path):
+        super().__init__(f"Already downloaded: {path}")
+        self.path = path
+
+
 def _sanitize_path_component(name: str, max_bytes: int = MAX_FILENAME_BYTES) -> str:
     """Sanitize a string for use as a directory or file name component.
 
@@ -341,6 +349,7 @@ def download(
     album_year: int | None = None,
     track_number: int | None = None,
     should_cancel: callable | None = None,
+    report_existing: bool = False,
 ) -> Path:
     """
     Download a track from YouTube Music.
@@ -420,6 +429,8 @@ def download(
     indexed = find_existing_download(config.data_dir, video_id, info)
     if indexed:
         logger.info("Skipping (library index): %s - %s", artist, title)
+        if report_existing:
+            raise ExistingDownloadError(indexed)
         return indexed
 
     # Check if already downloaded
@@ -434,6 +445,8 @@ def download(
     if existing:
         logger.info("Skipping (exists): %s - %s", artist, title)
         record_download(config.data_dir, video_id, info, existing)
+        if report_existing:
+            raise ExistingDownloadError(existing)
         return existing
 
     logger.info("Downloading: %s - %s", artist, title)

@@ -70,6 +70,25 @@ def find_existing_download(data_dir: Path, video_id: str, info: dict) -> Path | 
     return None
 
 
+def find_existing_video(data_dir: Path, video_id: str) -> Path | None:
+    """Return an indexed file for a video without requiring a metadata lookup."""
+    connection = _connect(data_dir)
+    try:
+        row = connection.execute(
+            "SELECT file_path FROM downloaded_tracks WHERE video_id = ?", (video_id,)
+        ).fetchone()
+        if not row:
+            return None
+        path = Path(row[0])
+        if path.is_file():
+            return path
+        connection.execute("DELETE FROM downloaded_tracks WHERE video_id = ?", (video_id,))
+        connection.commit()
+        return None
+    finally:
+        connection.close()
+
+
 def record_download(data_dir: Path, video_id: str, info: dict, audio_path: Path) -> None:
     """Remember a completed download, including existing files found on disk."""
     connection = _connect(data_dir)
