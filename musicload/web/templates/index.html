@@ -1484,6 +1484,10 @@
       async function handleDownload(e) {
         e.stopPropagation();
         const btn = e.currentTarget;
+        if (btn.dataset.queueJobId) {
+          await cancelInlineDownload(btn);
+          return;
+        }
         const videoId = btn.dataset.videoId;
         const title = btn.dataset.title;
         const artist = btn.dataset.artist;
@@ -1547,12 +1551,21 @@
         if (container) container.replaceWith(btn);
       }
 
-      function progressMarkup(job) {
-        const progress = Math.max(0, Math.min(100, Number(job.progress) || 0));
-        const details = [job.speed, job.eta].filter(Boolean).join(" · ");
+      function progressPercent(job) {
+        return Math.max(0, Math.min(100, Number(job.progress) || 0));
+      }
+
+      function progressDetails(job) {
+        const details = [`${progressPercent(job).toFixed(1)}%`];
+        if (job.speed) details.push(job.speed);
+        if (job.eta) details.push(`ETA ${job.eta}`);
+        return details.join(" · ");
+      }
+
+      function progressActionMarkup(job, label) {
         return `
-          <span class="progress-fill" style="width: ${progress}%"></span>
-          <span class="progress-text">${progress.toFixed(1)}%${details ? ` · ${escapeHtml(details)}` : ""}</span>
+          <span class="button-progress-fill" style="width: ${progressPercent(job)}%"></span>
+          <span class="button-progress-label">${label}</span>
         `;
       }
 
@@ -1562,35 +1575,31 @@
           container = document.createElement("span");
           container.className = "inline-download-control";
           btn.replaceWith(container);
+          const details = document.createElement("span");
+          details.className = "inline-download-details";
+          container.appendChild(details);
           container.appendChild(btn);
-          const cancelButton = document.createElement("button");
-          cancelButton.type = "button";
-          cancelButton.className = "inline-cancel-btn";
-          cancelButton.textContent = "Cancel";
-          cancelButton.addEventListener("click", () =>
-            cancelInlineDownload(btn, cancelButton),
-          );
-          container.appendChild(cancelButton);
         }
         btn.dataset.queueJobId = job.id;
         btn.classList.add("inline-download-progress");
-        btn.disabled = true;
-        btn.innerHTML = progressMarkup(job);
+        btn.disabled = false;
+        container.querySelector(".inline-download-details").textContent = progressDetails(job);
+        btn.innerHTML = progressActionMarkup(job, "Cancel");
       }
 
-      async function cancelInlineDownload(btn, cancelButton) {
+      async function cancelInlineDownload(btn) {
         const jobId = btn.dataset.queueJobId;
         if (!jobId) return;
-        cancelButton.disabled = true;
-        cancelButton.textContent = "Cancelling...";
+        btn.disabled = true;
+        btn.textContent = "Cancelling...";
         try {
           const response = await fetch(`/api/queue/${jobId}`, { method: "DELETE" });
           if (!response.ok) throw new Error("Cancellation failed");
           resetInlineDownloadButton(btn);
           showStatus("Download cancelled");
         } catch (error) {
-          cancelButton.disabled = false;
-          cancelButton.textContent = "Cancel";
+          btn.disabled = false;
+          btn.textContent = "Cancel";
           showStatus("Could not cancel the download", true);
         }
       }
@@ -1697,15 +1706,11 @@
         queueList.innerHTML = visibleJobs
           .map((job) => {
             const statusClass = job.status.toLowerCase();
-            let progressHtml = "";
+            let jobMetricsHtml = "";
             let actionsHtml = "";
 
             if (job.status === "queued" || job.status === "downloading") {
-              progressHtml = `
-                        <div class="progress-bar">
-                            ${progressMarkup(job)}
-                        </div>
-                    `;
+              jobMetricsHtml = `<span class="job-progress-details">${escapeHtml(progressDetails(job))}</span>`;
             }
 
             if (job.status === "completed" && job.file_path) {
@@ -1724,7 +1729,7 @@
 
             if (job.status === "queued" || job.status === "downloading") {
               actionsHtml += `
-                        <button class="cancel-job-btn" data-job-id="${job.id}">Cancel</button>
+                        <button class="cancel-job-btn progress-action-btn" data-job-id="${job.id}">${progressActionMarkup(job, "Cancel")}</button>
                     `;
             }
 
@@ -1739,9 +1744,11 @@
                                 <span class="job-title">${escapeHtml(job.title)}</span>
                                 <span class="job-artist">${escapeHtml(job.artist)}</span>
                             </div>
-                            <span class="job-status status-${statusClass}">${job.status.toUpperCase()}</span>
+                            <span class="job-state">
+                              <span class="job-status status-${statusClass}">${job.status.toUpperCase()}</span>
+                              ${jobMetricsHtml}
+                            </span>
                         </div>
-                        ${progressHtml}
                         ${errorHtml}
                         ${actionsHtml}
                     </div>
