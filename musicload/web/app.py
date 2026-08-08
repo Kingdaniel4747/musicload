@@ -44,6 +44,8 @@ app.add_middleware(
 
 # Global queue manager
 queue_manager: QueueManager | None = None
+_background_tasks: set[asyncio.Task] = set()
+_library_metadata_cache: dict[str, tuple[float, int, dict]] = {}
 
 # Global image proxy service
 _image_proxy: ImageProxyService | None = None
@@ -57,7 +59,6 @@ _mood_playlists_cache = TtlCache(max_entries=50, ttl_seconds=1800)  # 30 min
 _charts_cache = TtlCache(max_entries=20, ttl_seconds=1800)        # 30 min
 _playlist_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)  # 15 min
 _new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
-_listenbrainz_tracks_cache = TtlCache(max_entries=100, ttl_seconds=900)  # 15 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -185,6 +186,14 @@ async def startup_event():
     queue_manager = QueueManager()
     await queue_manager.start()
     _image_proxy = ImageProxyService()
+    for coroutine in (
+        _warm_library_cache(),
+        _warm_listenbrainz_caches(),
+        _listenbrainz_scheduler(),
+    ):
+        task = asyncio.create_task(coroutine)
+        _background_tasks.add(task)
+        task.add_done_callback(_background_tasks.discard)
 
 
 @app.on_event("shutdown")
@@ -194,6 +203,10 @@ async def shutdown_event():
         await queue_manager.stop()
     if _image_proxy:
         await _image_proxy.close()
+    for task in list(_background_tasks):
+        task.cancel()
+    if _background_tasks:
+        await asyncio.gather(*_background_tasks, return_exceptions=True)
 
 
 class DownloadRequest(BaseModel):
@@ -217,6 +230,9 @@ class ListenBrainzSettingsRequest(BaseModel):
     """ListenBrainz identity belonging to the current Musicload account."""
 
     username: str = Field(min_length=1, max_length=128)
+    auto_download: bool = False
+    download_time: str = Field(default="03:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
 
 
 class DownloadResponse(BaseModel):
@@ -468,14 +484,20 @@ def _require_listenbrainz_web() -> None:
 async def api_listenbrainz_settings(request: Request):
     """Return the ListenBrainz username for the current Musicload account."""
     _require_listenbrainz_web()
-    from musicload.web.listenbrainz_settings import get_listenbrainz_username
+    from musicload.web.listenbrainz_settings import get_listenbrainz_settings
 
-    username = await asyncio.to_thread(
-        get_listenbrainz_username,
+    settings = await asyncio.to_thread(
+        get_listenbrainz_settings,
         config.data_dir,
         _current_account_name(request),
     )
-    return {"username": username}
+    return settings or {
+        "username": None,
+        "auto_download": False,
+        "download_time": "03:00",
+        "timezone": "UTC",
+        "last_run_date": None,
+    }
 
 
 @app.put("/api/listenbrainz/settings")
@@ -484,27 +506,95 @@ async def api_save_listenbrainz_settings(
 ):
     """Save a ListenBrainz username for the current Musicload account."""
     _require_listenbrainz_web()
-    from musicload.web.listenbrainz_settings import set_listenbrainz_username
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from musicload.web.listenbrainz_settings import set_listenbrainz_settings
 
     username = settings.username.strip()
     if not username:
         raise HTTPException(status_code=400, detail="ListenBrainz username is required")
+    try:
+        ZoneInfo(settings.timezone)
+    except ZoneInfoNotFoundError as error:
+        raise HTTPException(status_code=400, detail="Invalid timezone") from error
     await asyncio.to_thread(
-        set_listenbrainz_username,
+        set_listenbrainz_settings,
         config.data_dir,
         _current_account_name(request),
-        username,
+        {
+            "username": username,
+            "auto_download": settings.auto_download,
+            "download_time": settings.download_time,
+            "timezone": settings.timezone,
+        },
     )
-    return {"success": True, "username": username}
+    return {
+        "success": True,
+        "username": username,
+        "auto_download": settings.auto_download,
+        "download_time": settings.download_time,
+        "timezone": settings.timezone,
+    }
+
+
+async def _refresh_listenbrainz_recommendations(username: str) -> dict:
+    """Fetch, match, and persist one user's weekly recommendations."""
+    from musicload.plugins.base import PluginConfig
+    from musicload.plugins.listenbrainz import ListenbrainzPlugin
+    from musicload.web.listenbrainz_settings import (
+        set_cached_recommendations,
+    )
+
+    plugin_config = PluginConfig(
+        name="web-listenbrainz",
+        download_dir=config.download_dir,
+        audio_format=config.audio_format,
+        filename_template=config.filename_template,
+        organization_mode=config.organization_mode,
+        use_primary_artist=config.use_primary_artist,
+        config={
+            "user": username,
+            "recommendation_type": "weekly-exploration",
+            "timeout": 15,
+        },
+    )
+    try:
+        songs = await asyncio.to_thread(ListenbrainzPlugin().fetch_songs, plugin_config)
+    except Exception as error:
+        if "Could not find <content>" in str(error) or "404" in str(error):
+            songs = []
+        else:
+            raise
+
+    results = []
+    for song in songs:
+        try:
+            matches = await asyncio.to_thread(search, song.search_query, 1)
+        except Exception as error:
+            logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
+            matches = []
+        if matches:
+            results.append(_track_to_response(matches[0]).model_dump())
+
+    payload = {
+        "playlist_exists": bool(songs),
+        "playlist_title": "Weekly Exploration",
+        "results": results,
+        "total": len(results),
+    }
+    await asyncio.to_thread(
+        set_cached_recommendations, config.data_dir, username, payload
+    )
+    return payload
 
 
 @app.get("/api/listenbrainz/recommendations/stream")
 async def api_listenbrainz_recommendations_stream(request: Request):
-    """Match the user's weekly ListenBrainz playlist to YouTube Music."""
+    """Return cached recommendations immediately or populate the cache once."""
     _require_listenbrainz_web()
-    from musicload.plugins.base import PluginConfig
-    from musicload.plugins.listenbrainz import ListenbrainzPlugin
-    from musicload.web.listenbrainz_settings import get_listenbrainz_username
+    from musicload.web.listenbrainz_settings import (
+        get_cached_recommendations,
+        get_listenbrainz_username,
+    )
 
     account_name = _current_account_name(request)
 
@@ -515,70 +605,16 @@ async def api_listenbrainz_recommendations_stream(request: Request):
         if not username:
             yield _sse_event("failure", {"message": "No ListenBrainz username configured"})
             return
-
-        cache_key = f"listenbrainz:{username.casefold()}"
-        cached = _listenbrainz_tracks_cache.get(cache_key)
-        if cached is not None:
-            yield _sse_event("complete", cached)
-            return
-
-        plugin_config = PluginConfig(
-            name="web-listenbrainz",
-            download_dir=config.download_dir,
-            audio_format=config.audio_format,
-            filename_template=config.filename_template,
-            organization_mode=config.organization_mode,
-            use_primary_artist=config.use_primary_artist,
-            config={
-                "user": username,
-                "recommendation_type": "weekly-exploration",
-                "timeout": 15,
-            },
+        payload = await asyncio.to_thread(
+            get_cached_recommendations, config.data_dir, username
         )
-        try:
-            songs = await asyncio.to_thread(
-                ListenbrainzPlugin().fetch_songs, plugin_config
-            )
-        except Exception as error:
-            logger.warning("ListenBrainz web fetch failed for %s: %s", username, error)
-            if "Could not find <content>" in str(error) or "404" in str(error):
-                yield _sse_event(
-                    "complete",
-                    {"playlist_exists": False, "results": [], "total": 0},
-                )
-                return
-            yield _sse_event("failure", {"message": str(error)})
-            return
-
-        if not songs:
-            payload = {"playlist_exists": False, "results": [], "total": 0}
-            _listenbrainz_tracks_cache.put(cache_key, payload)
-            yield _sse_event("complete", payload)
-            return
-
-        results = []
-        for index, song in enumerate(songs, start=1):
-            if await request.is_disconnected():
-                return
+        if payload is None:
             try:
-                matches = await asyncio.to_thread(search, song.search_query, 1)
+                payload = await _refresh_listenbrainz_recommendations(username)
             except Exception as error:
-                logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
-                matches = []
-            if matches:
-                results.append(_track_to_response(matches[0]).model_dump())
-            yield _sse_event(
-                "progress",
-                {"processed": index, "total": len(songs), "matched": len(results)},
-            )
-
-        payload = {
-            "playlist_exists": True,
-            "playlist_title": "Weekly Exploration",
-            "results": results,
-            "total": len(results),
-        }
-        _listenbrainz_tracks_cache.put(cache_key, payload)
+                logger.warning("ListenBrainz web fetch failed for %s: %s", username, error)
+                yield _sse_event("failure", {"message": str(error)})
+                return
         yield _sse_event("complete", payload)
 
     return StreamingResponse(
@@ -586,6 +622,105 @@ async def api_listenbrainz_recommendations_stream(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+async def _warm_listenbrainz_caches() -> None:
+    """Refresh persistent ListenBrainz caches at startup and every six hours."""
+    if not config.listenbrainz_web:
+        return
+    from musicload.web.listenbrainz_settings import list_listenbrainz_settings
+
+    while True:
+        settings = await asyncio.to_thread(list_listenbrainz_settings, config.data_dir)
+        for item in settings:
+            try:
+                await _refresh_listenbrainz_recommendations(item["username"])
+            except asyncio.CancelledError:
+                raise
+            except Exception as error:
+                logger.warning("ListenBrainz cache refresh failed for %s: %s", item["username"], error)
+        await asyncio.sleep(6 * 60 * 60)
+
+
+async def _listenbrainz_scheduler() -> None:
+    """Queue each account's new cached playlist at its optional local time."""
+    if not config.listenbrainz_web:
+        return
+    import hashlib
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from musicload.web.listenbrainz_settings import (
+        get_cached_recommendations,
+        list_listenbrainz_settings,
+        mark_listenbrainz_run,
+    )
+
+    while True:
+        try:
+            await asyncio.sleep(20)
+            if not queue_manager:
+                continue
+            settings = await asyncio.to_thread(list_listenbrainz_settings, config.data_dir)
+            for item in settings:
+                if not item["auto_download"]:
+                    continue
+                try:
+                    now = datetime.now(ZoneInfo(item["timezone"]))
+                except ZoneInfoNotFoundError:
+                    logger.warning("Invalid ListenBrainz timezone for %s", item["account_name"])
+                    continue
+                local_date = now.date().isoformat()
+                if item["last_run_date"] == local_date:
+                    continue
+                if now.strftime("%H:%M") < item["download_time"]:
+                    continue
+
+                try:
+                    payload = await _refresh_listenbrainz_recommendations(item["username"])
+                except Exception:
+                    logger.warning(
+                        "Scheduled ListenBrainz refresh failed for %s; using cache",
+                        item["username"],
+                        exc_info=True,
+                    )
+                    payload = await asyncio.to_thread(
+                        get_cached_recommendations, config.data_dir, item["username"]
+                    )
+                    if payload is None:
+                        continue
+                tracks = payload.get("results") or []
+                playlist_hash = hashlib.sha256(
+                    "\n".join(track["video_id"] for track in tracks).encode("utf-8")
+                ).hexdigest()
+                if tracks and playlist_hash != item.get("last_download_hash"):
+                    active_ids = {
+                        job.video_id
+                        for job in await queue_manager.list_jobs()
+                        if job.status.value in {"queued", "downloading"}
+                    }
+                    for track in tracks:
+                        if track["video_id"] in active_ids:
+                            continue
+                        await queue_manager.add_job(
+                            video_id=track["video_id"],
+                            title=track["title"],
+                            artist=track["artist"],
+                            format=config.audio_format,
+                            artists=track.get("artists") or [],
+                            album=track.get("album"),
+                        )
+                        active_ids.add(track["video_id"])
+                await asyncio.to_thread(
+                    mark_listenbrainz_run,
+                    config.data_dir,
+                    item["account_name"],
+                    local_date,
+                    playlist_hash,
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("ListenBrainz scheduler iteration failed")
 
 
 def _is_admin(request: Request) -> bool:
@@ -1091,7 +1226,9 @@ def _delete_downloaded_audio_file(file_path: str) -> str:
             parent.rmdir()
     except OSError:
         pass
-    return str(abs_path.relative_to(download_dir))
+    relative_path = str(abs_path.relative_to(download_dir))
+    _library_metadata_cache.pop(relative_path, None)
+    return relative_path
 
 
 @app.get("/api/download-file/{file_path:path}")
@@ -1873,6 +2010,37 @@ def _scan_library_files(download_dir: Path) -> list[Path]:
     return files
 
 
+def _build_library_cache_sync() -> dict[str, tuple[float, int, dict]]:
+    """Scan Local Files once and reuse unchanged metadata from SQLite."""
+    from musicload.web.library_cache import load_cached_files, replace_cached_files
+
+    existing = load_cached_files(config.data_dir)
+    refreshed: dict[str, tuple[float, int, dict]] = {}
+    for file_path in _scan_library_files(config.download_dir):
+        entry_path = str(file_path.relative_to(config.download_dir))
+        stat = file_path.stat()
+        cached = existing.get(entry_path)
+        if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+            metadata = cached[2]
+        else:
+            metadata = _extract_track_info(entry_path, config.download_dir)
+        refreshed[entry_path] = (stat.st_mtime, stat.st_size, metadata)
+    replace_cached_files(config.data_dir, refreshed)
+    return refreshed
+
+
+async def _warm_library_cache() -> None:
+    """Populate the in-memory Local Files index in the background at startup."""
+    global _library_metadata_cache
+    try:
+        _library_metadata_cache = await asyncio.to_thread(_build_library_cache_sync)
+        logger.info("Warmed Local Files cache with %d files", len(_library_metadata_cache))
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Failed to warm Local Files cache")
+
+
 def _resolve_library_path(entry_path: str, download_dir: Path) -> Path:
     """Resolve and validate a library entry path against directory traversal."""
     requested_path = Path(entry_path)
@@ -1908,8 +2076,22 @@ async def api_library_files(
     matching_tracks = []
     for f in all_files:
         rel_path = str(f.relative_to(download_dir))
-        info = await loop.run_in_executor(None, _extract_track_info, rel_path, download_dir)
         stat = f.stat()
+        cached = _library_metadata_cache.get(rel_path)
+        if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+            info = cached[2]
+        else:
+            info = await loop.run_in_executor(None, _extract_track_info, rel_path, download_dir)
+            _library_metadata_cache[rel_path] = (stat.st_mtime, stat.st_size, info)
+            from musicload.web.library_cache import set_cached_file
+            await asyncio.to_thread(
+                set_cached_file,
+                config.data_dir,
+                rel_path,
+                stat.st_mtime,
+                stat.st_size,
+                info,
+            )
         track = LibraryTrackResponse(
             entry_path=rel_path,
             title=info["title"] or f.stem,

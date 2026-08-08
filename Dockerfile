@@ -15,9 +15,9 @@ RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.14-slim@sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456 AS runtime
 
-# ffmpeg is the only system package Musicload needs at runtime.
+# ffmpeg handles audio; tzdata supports per-user automatic download times.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg && \
+    apt-get install -y --no-install-recommends ffmpeg tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 ARG UID=1000

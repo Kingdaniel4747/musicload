@@ -157,9 +157,15 @@
           </div>
           <form id="listenbrainz-settings-form" class="listenbrainz-settings-form">
             <input id="listenbrainz-username" type="text" maxlength="128" placeholder="ListenBrainz username" autocomplete="username" required>
+            <input id="listenbrainz-download-time" type="time" value="03:00" aria-label="Automatic download time">
+            <label class="listenbrainz-auto-toggle">
+              <input id="listenbrainz-auto-download" type="checkbox">
+              <span>Auto</span>
+            </label>
             <button type="submit">Save</button>
           </form>
         </div>
+        <div id="listenbrainz-countdown" class="listenbrainz-countdown" hidden></div>
         <div id="listenbrainz-content"></div>
       </div>
       {% endif %}
@@ -905,6 +911,28 @@
       }
 
       let listenbrainzEventSource = null;
+      let listenbrainzSchedule = null;
+
+      function updateListenBrainzCountdown() {
+        const countdown = document.getElementById("listenbrainz-countdown");
+        if (!countdown || !listenbrainzSchedule?.auto_download) {
+          if (countdown) countdown.hidden = true;
+          return;
+        }
+        const [hours, minutes] = listenbrainzSchedule.download_time.split(":").map(Number);
+        const now = new Date();
+        const next = new Date(now);
+        next.setHours(hours, minutes, 0, 0);
+        if (next <= now) next.setDate(next.getDate() + 1);
+        const seconds = Math.max(0, Math.floor((next - now) / 1000));
+        const hh = String(Math.floor(seconds / 3600)).padStart(2, "0");
+        const mm = String(Math.floor((seconds % 3600) / 60)).padStart(2, "0");
+        const ss = String(seconds % 60).padStart(2, "0");
+        countdown.textContent = `Automatic download in ${hh}:${mm}:${ss}`;
+        countdown.hidden = false;
+      }
+
+      window.setInterval(updateListenBrainzCountdown, 1000);
 
       function closeListenBrainzStream() {
         if (listenbrainzEventSource) {
@@ -968,6 +996,12 @@
           if (!response.ok) throw new Error("ListenBrainz is unavailable");
           const settings = await response.json();
           input.value = settings.username || "";
+          document.getElementById("listenbrainz-download-time").value =
+            settings.download_time || "03:00";
+          document.getElementById("listenbrainz-auto-download").checked =
+            Boolean(settings.auto_download);
+          listenbrainzSchedule = settings;
+          updateListenBrainzCountdown();
           if (!settings.username) {
             content.innerHTML = '<div class="listenbrainz-empty">Enter your ListenBrainz username to see your personal playlist.</div>';
             return;
@@ -1016,7 +1050,12 @@
             const response = await fetch("/api/listenbrainz/settings", {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ username: input.value.trim() }),
+              body: JSON.stringify({
+                username: input.value.trim(),
+                auto_download: document.getElementById("listenbrainz-auto-download").checked,
+                download_time: document.getElementById("listenbrainz-download-time").value || "03:00",
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+              }),
             });
             const data = await response.json().catch(() => ({}));
             if (!response.ok) throw new Error(data.detail || "Could not save username");

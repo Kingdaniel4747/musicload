@@ -2585,6 +2585,21 @@ header h1 .version, header p { display: none; }
     background: var(--bg-secondary);
     color: var(--text-primary);
 }
+.listenbrainz-settings-form input[type="text"] { flex: 1; }
+.listenbrainz-settings-form input[type="time"] { flex: 0 0 7.2rem; }
+.listenbrainz-auto-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    min-height: 2.45rem;
+    padding: 0 0.55rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.55rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.78rem;
+}
+.listenbrainz-auto-toggle input { flex: 0 0 auto; width: auto; min-height: auto; }
 .listenbrainz-settings-form button {
     min-height: 2.45rem;
     padding: 0.5rem 0.9rem;
@@ -2600,6 +2615,12 @@ header h1 .version, header p { display: none; }
     color: var(--text-secondary);
     text-align: center;
 }
+.listenbrainz-countdown {
+    margin: -0.4rem 0 1rem;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    text-align: right;
+}
 
 @media (max-width: 720px) {
     .listenbrainz-header,
@@ -2608,5 +2629,9 @@ header h1 .version, header p { display: none; }
         flex-direction: column;
     }
     .listenbrainz-settings-form { flex-basis: auto; width: 100%; }
+    .listenbrainz-settings-form { flex-wrap: wrap; }
+    .listenbrainz-settings-form input[type="text"] { flex-basis: 100%; }
+    .listenbrainz-settings-form input[type="time"] { flex: 1 1 7rem; }
+    .listenbrainz-countdown { text-align: left; }
     .listenbrainz-playlist-heading .download-all-btn { width: 100%; }
 }

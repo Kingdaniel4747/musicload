@@ -219,6 +219,14 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | `MUSICLOAD_WEB_PLAYLIST` | unset | Optional M3U playlist name for manual web downloads. |
 | `MUSICLOAD_MULTI_USER` | `false` | Prefix web playlists by remote user. |
 | `MUSICLOAD_LISTENBRAINZ_WEB` | `false` | Show the optional per-account ListenBrainz tab for manually exploring and downloading Weekly Exploration recommendations. |
+
+When the ListenBrainz web tab is enabled, each signed-in user can save a separate
+ListenBrainz username and optionally enable a daily local-time download check. Matched
+recommendations and Local Files metadata are persisted under `MUSICLOAD_DATA_DIR`, so
+they remain fast after container restarts. Automatic checks only queue a playlist when
+its matched track set has changed; the standalone cron service remains optional.
+Start the legacy/global cron configuration only when needed with
+`docker compose --profile cron up -d`.
 | `MUSICLOAD_CORS_ORIGINS` | `*` | Allowed browser origins, comma-separated. |
 | `MUSICLOAD_COOKIE_MODE` | `auto` | Cookie usage: `auto`, `always`, or `never`. |
 | `MUSICLOAD_COOKIE_RETRY_DELAY` | `1.0` | Wait time before a cookie retry, in seconds. |

@@ -1,5 +1,6 @@
 services:
   musicload:
+    build: .
     image: ghcr.io/kingdaniel4747/musicload:latest
     container_name: musicload
     ports:
@@ -28,6 +29,8 @@ services:
   # Runs automatically together with the web interface.
   # Edit the included cron.yaml with your ListenBrainz user and/or YouTube playlists.
   musicload-cron:
+    # Optional legacy/global scheduler. Start with: docker compose --profile cron up -d
+    profiles: ["cron"]
     image: ghcr.io/kingdaniel4747/musicload:latest
     container_name: musicload-cron
     command: ["musicload", "cron", "--config", "/config/cron.yaml"]
