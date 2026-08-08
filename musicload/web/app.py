@@ -1113,7 +1113,6 @@ async def add_to_queue(request: QueueAddRequest, http_request: Request):
             status_code=400, detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
         )
 
-    config = get_config()
     job_id = await queue_manager.add_job(
         video_id=request.video_id,
         title=request.title,
@@ -1150,7 +1149,6 @@ async def add_album_to_queue(request: QueueAddAlbumRequest, http_request: Reques
                 status_code=400, detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
             )
 
-        config = get_config()
         job_ids = []
         for track_number, track in enumerate(tracks, start=1):
             job_id = await queue_manager.add_job(

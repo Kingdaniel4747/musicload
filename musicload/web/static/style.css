@@ -2417,11 +2417,11 @@ header h1 .version, header p { display: none; }
         background: rgba(15, 16, 19, 0.96);
         backdrop-filter: blur(16px);
     }
-    .mobile-nav.mobile-nav-four {
-        grid-template-columns: repeat(4, 1fr);
-    }
     .mobile-nav.mobile-nav-three {
         grid-template-columns: repeat(3, 1fr);
+    }
+    .mobile-nav.mobile-nav-two {
+        grid-template-columns: repeat(2, 1fr);
     }
     .mobile-nav-btn {
         display: flex;
@@ -2437,6 +2437,12 @@ header h1 .version, header p { display: none; }
         font-weight: 650;
     }
     .mobile-nav-icon { font-size: 1.28rem; line-height: 1; }
+    .mobile-downloads-icon { position: relative; }
+    .mobile-downloads-icon .downloads-badge {
+        top: -0.55rem;
+        right: -0.9rem;
+        border-color: rgba(15, 16, 19, 0.96);
+    }
     .mobile-nav-btn.active { color: #ff405d; background: rgba(200, 16, 46, 0.1); }
 
     /* Keep local album art anchored to the same left edge on every row. */

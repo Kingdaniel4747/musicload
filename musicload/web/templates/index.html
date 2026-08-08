@@ -163,18 +163,15 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
-    <nav class="mobile-nav{% if is_admin %} mobile-nav-four{% else %} mobile-nav-three{% endif %}" aria-label="Main navigation">
+    <nav class="mobile-nav{% if is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon">⌕</span><span>Explore</span>
-      </button>
-      <button class="mobile-nav-btn" data-mobile-tab="search" aria-label="Search">
-        <span class="mobile-nav-icon">⌕</span><span>Search</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="library" aria-label="Library" {% if not is_admin %}hidden{% endif %}>
         <span class="mobile-nav-icon">▣</span><span>Library</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
-        <span class="mobile-nav-icon">↓</span><span>Downloads</span>
+        <span class="mobile-nav-icon mobile-downloads-icon">↓<span id="mobile-downloads-badge" class="downloads-badge" hidden>0</span></span><span>Downloads</span>
       </button>
     </nav>
 
@@ -526,11 +523,6 @@
       document.querySelectorAll(".mobile-nav-btn").forEach((btn) => {
         btn.addEventListener("click", () => {
           const target = btn.dataset.mobileTab;
-          if (target === "search") {
-            searchInput.focus();
-            window.scrollTo({ top: 0, behavior: "smooth" });
-            return;
-          }
           document.getElementById(`${target}-btn`).click();
         });
       });
@@ -1352,6 +1344,7 @@
           if (response.ok) {
             btn.textContent = `Queued (${data.track_count})`;
             showStatus(`Added ${data.track_count} tracks to queue`);
+            await fetchQueue();
             setTimeout(() => {
               btn.textContent = "Download Album";
               btn.disabled = false;
@@ -1521,6 +1514,7 @@
             btn.textContent = "Cancel";
             btn.disabled = false;
             showStatus(`Added to queue: ${title}`);
+            await fetchQueue();
           } else {
             btn.textContent = "Failed";
             showStatus("Failed to add to queue", true);
@@ -1565,23 +1559,28 @@
 
       // Queue Management
       let eventSource = null;
+      let queueReconnectTimer = null;
 
       function initQueue() {
-        // Connect to SSE endpoint for real-time updates
-        eventSource = new EventSource("/api/queue/stream");
+        if (eventSource) eventSource.close();
+        if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
 
-        eventSource.onmessage = (event) => {
+        // Connect to SSE endpoint for real-time updates
+        const source = new EventSource("/api/queue/stream");
+        eventSource = source;
+
+        source.onmessage = (event) => {
           const jobs = JSON.parse(event.data);
           updateQueueUI(jobs);
         };
 
-        eventSource.onerror = (error) => {
+        source.onerror = (error) => {
+          if (eventSource !== source) return;
           console.error("SSE error:", error);
-          // Reconnect after 5 seconds
-          setTimeout(() => {
-            if (eventSource) {
-              eventSource.close();
-            }
+          source.close();
+          eventSource = null;
+          queueReconnectTimer = setTimeout(() => {
+            queueReconnectTimer = null;
             initQueue();
           }, 5000);
         };
@@ -1600,18 +1599,22 @@
         }
       }
 
-      let previousJobStatuses = {};
-
       function updateQueueUI(jobs) {
         const queueList = document.getElementById("queue-list");
         const queueSection = document.getElementById("queue-section");
         const downloadsBadge = document.getElementById("downloads-badge");
+        const mobileDownloadsBadge = document.getElementById("mobile-downloads-badge");
+        jobs = [...jobs].sort(
+          (left, right) => new Date(right.created_at) - new Date(left.created_at),
+        );
         queueJobs = jobs;
         const activeJobs = jobs.filter((job) =>
           job.status === "queued" || job.status === "downloading",
         );
         downloadsBadge.hidden = activeJobs.length === 0;
         downloadsBadge.textContent = activeJobs.length;
+        mobileDownloadsBadge.hidden = activeJobs.length === 0;
+        mobileDownloadsBadge.textContent = activeJobs.length;
 
         document.querySelectorAll(".queued-download-btn").forEach((button) => {
           const job = jobs.find((item) => item.id === button.dataset.queueJobId);
@@ -1620,18 +1623,6 @@
           }
         });
 
-        // Detect newly completed jobs
-        let hasNewlyCompleted = false;
-        for (const job of jobs) {
-          if (
-            job.status === "completed" &&
-            previousJobStatuses[job.id] &&
-            previousJobStatuses[job.id] !== "completed"
-          ) {
-            hasNewlyCompleted = true;
-          }
-          previousJobStatuses[job.id] = job.status;
-        }
         queueSection.style.display = "block";
         if (jobs.length === 0) {
           queueList.innerHTML = `
@@ -1735,21 +1726,6 @@
         } catch (error) {
           console.error("Failed to remove job:", error);
           showStatus("Failed to remove job", true);
-        }
-      }
-
-      async function clearCompleted() {
-        try {
-          const response = await fetch("/api/queue/jobs");
-          const data = await response.json();
-          for (const job of data.jobs) {
-            if (job.status === "completed" || job.status === "failed") {
-              await removeJob(job.id);
-            }
-          }
-        } catch (error) {
-          console.error("Failed to clear completed:", error);
-          showStatus("Failed to clear completed jobs", true);
         }
       }
 
@@ -2823,7 +2799,10 @@
                 audio_format: format,
               }),
             });
-            if (response.ok) queued++;
+            if (response.ok) {
+              queued++;
+              await fetchQueue();
+            }
           } catch (error) {
             console.error(`Failed to queue ${track.title}:`, error);
           }
