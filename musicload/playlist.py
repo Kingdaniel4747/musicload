@@ -64,7 +64,7 @@ def add_to_m3u(
         # Write to temp file then rename (atomic on POSIX)
         temp_path = m3u_path.with_suffix(".m3u.tmp")
         temp_path.write_text("\n".join(all_entries) + "\n", encoding="utf-8")
-        temp_path.rename(m3u_path)
+        temp_path.replace(m3u_path)
 
         if added_count > 0:
             logger.info("Added %d track(s) to playlist: %s", added_count, m3u_path.name)

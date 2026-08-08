@@ -89,6 +89,32 @@ def find_existing_video(data_dir: Path, video_id: str) -> Path | None:
         connection.close()
 
 
+def find_existing_track(
+    data_dir: Path, video_id: str, title: str, artist: str
+) -> Path | None:
+    """Return an indexed file by video ID or normalized artist/title."""
+    identity_prefix = f"{_normalise(artist)}|{_normalise(title)}|%"
+    connection = _connect(data_dir)
+    try:
+        rows = connection.execute(
+            "SELECT video_id, file_path FROM downloaded_tracks "
+            "WHERE video_id = ? OR identity_key LIKE ? "
+            "ORDER BY CASE WHEN video_id = ? THEN 0 ELSE 1 END",
+            (video_id, identity_prefix, video_id),
+        ).fetchall()
+        for indexed_video_id, indexed_path in rows:
+            path = Path(indexed_path)
+            if path.is_file():
+                return path
+            connection.execute(
+                "DELETE FROM downloaded_tracks WHERE video_id = ?", (indexed_video_id,)
+            )
+        connection.commit()
+        return None
+    finally:
+        connection.close()
+
+
 def record_download(data_dir: Path, video_id: str, info: dict, audio_path: Path) -> None:
     """Remember a completed download, including existing files found on disk."""
     connection = _connect(data_dir)

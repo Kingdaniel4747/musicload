@@ -1699,7 +1699,7 @@
 
           if (response.ok) {
             if (data.status === "existing") {
-              resetInlineDownloadButton(btn);
+              showExistingDownloadFeedback(btn);
               return;
             }
             downloadAttention = true;
@@ -1736,6 +1736,17 @@
         btn.classList.remove("inline-download-progress");
         btn.disabled = false;
         btn.textContent = btn.dataset.defaultLabel || "Download";
+      }
+
+      function showExistingDownloadFeedback(btn) {
+        resetInlineDownloadButton(btn);
+        btn.disabled = true;
+        btn.classList.add("already-downloaded");
+        btn.textContent = "Already downloaded";
+        window.setTimeout(() => {
+          btn.classList.remove("already-downloaded");
+          resetInlineDownloadButton(btn);
+        }, 2200);
       }
 
       function progressPercent(job) {

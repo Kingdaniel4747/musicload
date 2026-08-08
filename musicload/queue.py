@@ -10,6 +10,7 @@ from typing import Optional
 from musicload.config import get_config
 from musicload.download import DownloadCancelledError, ExistingDownloadError, download
 from musicload.models.queue import DownloadJob, JobStatus
+from musicload.playlist import add_to_m3u
 
 logger = logging.getLogger(__name__)
 
@@ -218,9 +219,13 @@ class QueueManager:
                 current_job.file_path = str(audio_path) if audio_path else None
                 current_job.completed_at = datetime.now()
                 current_job.progress = 100.0
+            if job.playlist_name and audio_path:
+                add_to_m3u([audio_path], job.playlist_name, config.download_dir)
             logger.info("Job completed: %s - %s (id=%s)", job.artist, job.title, job.id)
 
         except (DownloadCancelledError, ExistingDownloadError) as error:
+            if isinstance(error, ExistingDownloadError) and job.playlist_name:
+                add_to_m3u([error.path], job.playlist_name, config.download_dir)
             async with self._jobs_lock:
                 self.jobs.pop(job.id, None)
                 self._cancelled_job_ids.discard(job.id)

@@ -440,6 +440,13 @@ header p {
     opacity: 0.6;
     cursor: not-allowed;
 }
+.download-btn.already-downloaded:disabled {
+    border-color: #35b86b;
+    background: rgba(53, 184, 107, 0.16);
+    color: #79e7a5;
+    cursor: default;
+    opacity: 1;
+}
 
 /* Save to Computer button variant */
 .download-btn.save-btn {

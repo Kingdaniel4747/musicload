@@ -22,7 +22,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 from musicload import __version__
 from musicload.config import get_config
 from musicload.download import download
-from musicload.playlist import read_m3u, remove_from_m3u
+from musicload.playlist import add_to_m3u, read_m3u, remove_from_m3u
 from musicload.queue import QueueManager
 from musicload.search import search
 from musicload.web.api_cache import TtlCache
@@ -518,10 +518,11 @@ async def api_save_listenbrainz_settings(
         ZoneInfo(settings.timezone)
     except ZoneInfoNotFoundError as error:
         raise HTTPException(status_code=400, detail="Invalid timezone") from error
+    account_name = _current_account_name(request)
     await asyncio.to_thread(
         set_listenbrainz_settings,
         config.data_dir,
-        _current_account_name(request),
+        account_name,
         {
             "username": username,
             "auto_download": settings.auto_download,
@@ -530,6 +531,13 @@ async def api_save_listenbrainz_settings(
             "timezone": settings.timezone,
         },
     )
+    if settings.auto_download:
+        await asyncio.to_thread(
+            add_to_m3u,
+            [],
+            _listenbrainz_playlist_name(account_name),
+            config.download_dir,
+        )
     return {
         "success": True,
         "username": username,
@@ -589,6 +597,12 @@ async def _refresh_listenbrainz_recommendations(username: str) -> dict:
         set_cached_recommendations, config.data_dir, username, payload
     )
     return payload
+
+
+def _listenbrainz_playlist_name(account_name: str) -> str:
+    """Return a filesystem-safe per-account playlist name."""
+    safe_account = re.sub(r"[^A-Za-z0-9._-]+", "-", account_name).strip("-._")
+    return f"ListenBrainz Weekly - {safe_account or 'user'}"
 
 
 @app.get("/api/listenbrainz/recommendations/stream")
@@ -699,6 +713,7 @@ async def _listenbrainz_scheduler() -> None:
                     "\n".join(track["video_id"] for track in tracks).encode("utf-8")
                 ).hexdigest()
                 if tracks and playlist_hash != item.get("last_download_hash"):
+                    playlist_name = _listenbrainz_playlist_name(item["account_name"])
                     active_ids = {
                         job.video_id
                         for job in await queue_manager.list_jobs()
@@ -714,6 +729,7 @@ async def _listenbrainz_scheduler() -> None:
                             format=config.audio_format,
                             artists=track.get("artists") or [],
                             album=track.get("album"),
+                            playlist_name=playlist_name,
                         )
                         active_ids.add(track["video_id"])
                 await asyncio.to_thread(
@@ -1426,9 +1442,15 @@ async def add_to_queue(request: QueueAddRequest, http_request: Request):
             status_code=400, detail=f"Invalid format. Must be one of: {', '.join(valid_formats)}"
         )
 
-    from musicload.library_index import find_existing_video
+    from musicload.library_index import find_existing_track
 
-    existing = await asyncio.to_thread(find_existing_video, config.data_dir, request.video_id)
+    existing = await asyncio.to_thread(
+        find_existing_track,
+        config.data_dir,
+        request.video_id,
+        request.title,
+        request.artist,
+    )
     if existing:
         return QueueAddResponse(status="existing")
 
