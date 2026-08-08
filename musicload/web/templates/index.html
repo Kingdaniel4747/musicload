@@ -1348,7 +1348,6 @@
 
           if (response.ok) {
             btn.textContent = `Queued (${data.track_count})`;
-            showStatus(`Added ${data.track_count} tracks to queue`);
             await fetchQueue();
             setTimeout(() => {
               btn.textContent = "Download Album";
@@ -1522,7 +1521,6 @@
               speed: "Waiting",
               eta: "",
             });
-            showStatus(`Added to queue: ${title}`);
             await fetchQueue();
           } else {
             btn.textContent = "Failed";
@@ -1543,12 +1541,11 @@
       }
 
       function resetInlineDownloadButton(btn) {
-        const container = btn.closest(".inline-download-control");
         delete btn.dataset.queueJobId;
+        delete btn.dataset.progressDetails;
         btn.classList.remove("inline-download-progress");
         btn.disabled = false;
         btn.textContent = btn.dataset.defaultLabel || "Download";
-        if (container) container.replaceWith(btn);
       }
 
       function progressPercent(job) {
@@ -1570,20 +1567,10 @@
       }
 
       function renderInlineDownload(btn, job) {
-        let container = btn.closest(".inline-download-control");
-        if (!container) {
-          container = document.createElement("span");
-          container.className = "inline-download-control";
-          btn.replaceWith(container);
-          const details = document.createElement("span");
-          details.className = "inline-download-details";
-          container.appendChild(details);
-          container.appendChild(btn);
-        }
         btn.dataset.queueJobId = job.id;
+        btn.dataset.progressDetails = progressDetails(job);
         btn.classList.add("inline-download-progress");
         btn.disabled = false;
-        container.querySelector(".inline-download-details").textContent = progressDetails(job);
         btn.innerHTML = progressActionMarkup(job, "Cancel");
       }
 
@@ -1674,7 +1661,7 @@
           );
           if (job && ["queued", "downloading"].includes(job.status)) {
             renderInlineDownload(button, job);
-          } else if (button.dataset.queueJobId || button.closest(".inline-download-control")) {
+          } else if (button.dataset.queueJobId) {
             resetInlineDownloadButton(button);
           }
         });
@@ -2900,7 +2887,6 @@
         }
 
         btn.textContent = `Queued ${queued}/${tracks.length}`;
-        showStatus(`Added ${queued} tracks to queue`);
         setTimeout(() => {
           btn.textContent = originalText;
           btn.disabled = false;
