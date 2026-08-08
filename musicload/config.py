@@ -43,6 +43,7 @@ class Config:
     navidrome_url: str | None = None
     session_secret: str | None = None
     session_https_only: bool = True
+    listenbrainz_web: bool = False
 
     def effective_playlist_name(self, remote_user: str | None) -> str | None:
         """Return the playlist name, optionally prefixed with the remote user."""
@@ -167,6 +168,9 @@ class Config:
             session_secret=os.getenv("MUSICLOAD_SESSION_SECRET"),
             session_https_only=os.getenv(
                 "MUSICLOAD_SESSION_HTTPS_ONLY", "true"
+            ).lower() in ("true", "1", "yes"),
+            listenbrainz_web=os.getenv(
+                "MUSICLOAD_LISTENBRAINZ_WEB", "false"
             ).lower() in ("true", "1", "yes"),
         )
 

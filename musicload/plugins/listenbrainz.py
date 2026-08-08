@@ -3,6 +3,7 @@
 import logging
 import re
 from html import unescape
+from urllib.parse import quote
 
 import httpx
 from bs4 import BeautifulSoup
@@ -55,7 +56,7 @@ class ListenbrainzPlugin:
         timeout = config.config.get("timeout", 10)
 
         url = (
-            f"https://listenbrainz.org/syndication-feed/user/{user}/recommendations"
+            f"https://listenbrainz.org/syndication-feed/user/{quote(user, safe='')}/recommendations"
             f"?recommendation_type={rec_type}"
         )
 

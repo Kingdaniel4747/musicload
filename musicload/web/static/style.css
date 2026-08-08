@@ -2086,19 +2086,20 @@ header h1 .version, header p { display: none; }
     transform: none;
 }
 
-#explore-btn, #library-btn, #downloads-btn {
+#explore-btn, #library-btn, #listenbrainz-btn, #downloads-btn {
     width: auto;
     min-width: auto;
     padding: 0 0.72rem;
     font-size: 0;
 }
-#explore-btn::after, #library-btn::after, #downloads-btn::after {
+#explore-btn::after, #library-btn::after, #listenbrainz-btn::after, #downloads-btn::after {
     font-size: 0.83rem;
     font-weight: 650;
     letter-spacing: 0;
 }
 #explore-btn::after { content: "Explore"; }
 #library-btn::after { content: "Library"; }
+#listenbrainz-btn::after { content: "ListenBrainz"; }
 #downloads-btn::after { content: "Downloads"; }
 .search-form {
     max-width: 720px;
@@ -2278,7 +2279,7 @@ header h1 .version, header p { display: none; }
     }
     .header-content { gap: 0.5rem; }
     header h1 { font-size: 1.1rem; }
-    #explore-btn, #library-btn, #downloads-btn { display: none; }
+    #explore-btn, #library-btn, #listenbrainz-btn, #downloads-btn { display: none; }
     .format-selector { display: none; }
     #cookies-btn { min-width: 2.2rem; min-height: 2.2rem; height: 2.2rem; }
     .search-form { margin: 0.75rem 0 1rem; }
@@ -2316,6 +2317,9 @@ header h1 .version, header p { display: none; }
     }
     .mobile-nav.mobile-nav-three {
         grid-template-columns: repeat(3, 1fr);
+    }
+    .mobile-nav.mobile-nav-four {
+        grid-template-columns: repeat(4, 1fr);
     }
     .mobile-nav.mobile-nav-two {
         grid-template-columns: repeat(2, 1fr);
@@ -2545,4 +2549,64 @@ header h1 .version, header p { display: none; }
         flex: 1 1 0;
         min-width: 0;
     }
+}
+
+/* Optional per-account ListenBrainz explorer. */
+.listenbrainz-section { display: none; }
+.listenbrainz-section.active { display: block; }
+.listenbrainz-header,
+.listenbrainz-playlist-heading {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 1rem;
+    margin: 1.25rem 0 1rem;
+}
+.listenbrainz-header h2,
+.listenbrainz-playlist-heading h3 { margin: 0; }
+.listenbrainz-header p,
+.listenbrainz-playlist-heading span {
+    margin: 0.3rem 0 0;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+}
+.listenbrainz-settings-form {
+    display: flex;
+    flex: 0 1 28rem;
+    gap: 0.5rem;
+}
+.listenbrainz-settings-form input {
+    min-width: 0;
+    min-height: 2.45rem;
+    flex: 1;
+    padding: 0.55rem 0.75rem;
+    border: 1px solid var(--border-color);
+    border-radius: 0.55rem;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+.listenbrainz-settings-form button {
+    min-height: 2.45rem;
+    padding: 0.5rem 0.9rem;
+    border: 1px solid var(--accent-primary);
+    border-radius: 0.55rem;
+    background: transparent;
+    color: #ff526c;
+    cursor: pointer;
+    font-weight: 650;
+}
+.listenbrainz-empty {
+    padding: 3rem 1rem;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+@media (max-width: 720px) {
+    .listenbrainz-header,
+    .listenbrainz-playlist-heading {
+        align-items: stretch;
+        flex-direction: column;
+    }
+    .listenbrainz-settings-form { flex-basis: auto; width: 100%; }
+    .listenbrainz-playlist-heading .download-all-btn { width: 100%; }
 }

@@ -57,6 +57,7 @@ _mood_playlists_cache = TtlCache(max_entries=50, ttl_seconds=1800)  # 30 min
 _charts_cache = TtlCache(max_entries=20, ttl_seconds=1800)        # 30 min
 _playlist_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)  # 15 min
 _new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
+_listenbrainz_tracks_cache = TtlCache(max_entries=100, ttl_seconds=900)  # 15 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -210,6 +211,12 @@ class LoginRequest(BaseModel):
 
     username: str = Field(min_length=1, max_length=128)
     password: str = Field(min_length=1, max_length=1024)
+
+
+class ListenBrainzSettingsRequest(BaseModel):
+    """ListenBrainz identity belonging to the current Musicload account."""
+
+    username: str = Field(min_length=1, max_length=128)
 
 
 class DownloadResponse(BaseModel):
@@ -378,6 +385,7 @@ async def index(request: Request):
             "auth_user": request.session.get("username") if config.navidrome_url else None,
             "is_admin": is_admin,
             "can_view_logs": is_admin,
+            "listenbrainz_enabled": config.listenbrainz_web,
         },
     )
 
@@ -439,6 +447,145 @@ async def api_auth_status(request: Request):
         "username": request.session.get("username"),
         "is_admin": bool(request.session.get("is_admin")),
     }
+
+
+def _current_account_name(request: Request) -> str:
+    """Return the stable local account key used for per-user web settings."""
+    if config.navidrome_url:
+        username = request.session.get("username")
+        if not username:
+            raise HTTPException(status_code=401, detail="Authentication required")
+        return str(username)
+    return "local"
+
+
+def _require_listenbrainz_web() -> None:
+    if not config.listenbrainz_web:
+        raise HTTPException(status_code=404, detail="ListenBrainz web explorer is disabled")
+
+
+@app.get("/api/listenbrainz/settings")
+async def api_listenbrainz_settings(request: Request):
+    """Return the ListenBrainz username for the current Musicload account."""
+    _require_listenbrainz_web()
+    from musicload.web.listenbrainz_settings import get_listenbrainz_username
+
+    username = await asyncio.to_thread(
+        get_listenbrainz_username,
+        config.data_dir,
+        _current_account_name(request),
+    )
+    return {"username": username}
+
+
+@app.put("/api/listenbrainz/settings")
+async def api_save_listenbrainz_settings(
+    settings: ListenBrainzSettingsRequest, request: Request
+):
+    """Save a ListenBrainz username for the current Musicload account."""
+    _require_listenbrainz_web()
+    from musicload.web.listenbrainz_settings import set_listenbrainz_username
+
+    username = settings.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="ListenBrainz username is required")
+    await asyncio.to_thread(
+        set_listenbrainz_username,
+        config.data_dir,
+        _current_account_name(request),
+        username,
+    )
+    return {"success": True, "username": username}
+
+
+@app.get("/api/listenbrainz/recommendations/stream")
+async def api_listenbrainz_recommendations_stream(request: Request):
+    """Match the user's weekly ListenBrainz playlist to YouTube Music."""
+    _require_listenbrainz_web()
+    from musicload.plugins.base import PluginConfig
+    from musicload.plugins.listenbrainz import ListenbrainzPlugin
+    from musicload.web.listenbrainz_settings import get_listenbrainz_username
+
+    account_name = _current_account_name(request)
+
+    async def event_generator():
+        username = await asyncio.to_thread(
+            get_listenbrainz_username, config.data_dir, account_name
+        )
+        if not username:
+            yield _sse_event("failure", {"message": "No ListenBrainz username configured"})
+            return
+
+        cache_key = f"listenbrainz:{username.casefold()}"
+        cached = _listenbrainz_tracks_cache.get(cache_key)
+        if cached is not None:
+            yield _sse_event("complete", cached)
+            return
+
+        plugin_config = PluginConfig(
+            name="web-listenbrainz",
+            download_dir=config.download_dir,
+            audio_format=config.audio_format,
+            filename_template=config.filename_template,
+            organization_mode=config.organization_mode,
+            use_primary_artist=config.use_primary_artist,
+            config={
+                "user": username,
+                "recommendation_type": "weekly-exploration",
+                "timeout": 15,
+            },
+        )
+        try:
+            songs = await asyncio.to_thread(
+                ListenbrainzPlugin().fetch_songs, plugin_config
+            )
+        except Exception as error:
+            logger.warning("ListenBrainz web fetch failed for %s: %s", username, error)
+            if "Could not find <content>" in str(error) or "404" in str(error):
+                yield _sse_event(
+                    "complete",
+                    {"playlist_exists": False, "results": [], "total": 0},
+                )
+                return
+            yield _sse_event("failure", {"message": str(error)})
+            return
+
+        if not songs:
+            payload = {"playlist_exists": False, "results": [], "total": 0}
+            _listenbrainz_tracks_cache.put(cache_key, payload)
+            yield _sse_event("complete", payload)
+            return
+
+        results = []
+        for index, song in enumerate(songs, start=1):
+            if await request.is_disconnected():
+                return
+            try:
+                matches = await asyncio.to_thread(search, song.search_query, 1)
+            except Exception as error:
+                logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
+                matches = []
+            if matches:
+                results.append(_track_to_response(matches[0]).model_dump())
+            yield _sse_event(
+                "progress",
+                {"processed": index, "total": len(songs), "matched": len(results)},
+            )
+
+        payload = {
+            "playlist_exists": True,
+            "playlist_title": "Weekly Exploration",
+            "results": results,
+            "total": len(results),
+        }
+        _listenbrainz_tracks_cache.put(cache_key, payload)
+        yield _sse_event("complete", payload)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _is_admin(request: Request) -> bool:

@@ -218,6 +218,7 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | `MUSICLOAD_ALLOW_UGC` | `false` | Allow user-generated YouTube uploads in results. |
 | `MUSICLOAD_WEB_PLAYLIST` | unset | Optional M3U playlist name for manual web downloads. |
 | `MUSICLOAD_MULTI_USER` | `false` | Prefix web playlists by remote user. |
+| `MUSICLOAD_LISTENBRAINZ_WEB` | `false` | Show the optional per-account ListenBrainz tab for manually exploring and downloading Weekly Exploration recommendations. |
 | `MUSICLOAD_CORS_ORIGINS` | `*` | Allowed browser origins, comma-separated. |
 | `MUSICLOAD_COOKIE_MODE` | `auto` | Cookie usage: `auto`, `always`, or `never`. |
 | `MUSICLOAD_COOKIE_RETRY_DELAY` | `1.0` | Wait time before a cookie retry, in seconds. |

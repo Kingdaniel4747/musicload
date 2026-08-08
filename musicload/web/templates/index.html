@@ -57,6 +57,16 @@
             >
               📁
             </button>
+            {% if listenbrainz_enabled %}
+            <button
+              id="listenbrainz-btn"
+              class="icon-btn"
+              aria-label="ListenBrainz"
+              title="ListenBrainz"
+            >
+              LB
+            </button>
+            {% endif %}
             <button
               id="downloads-btn"
               class="icon-btn downloads-tab-btn"
@@ -138,6 +148,21 @@
       <div id="songs-results" class="results"></div>
       <div id="albums-results" class="albums-grid"></div>
       <div id="explore-results" class="explore-section active"></div>
+      {% if listenbrainz_enabled %}
+      <div id="listenbrainz-results" class="explore-section listenbrainz-section">
+        <div class="listenbrainz-header">
+          <div>
+            <h2>ListenBrainz</h2>
+            <p>Explore your personal Weekly Exploration playlist. Nothing downloads automatically.</p>
+          </div>
+          <form id="listenbrainz-settings-form" class="listenbrainz-settings-form">
+            <input id="listenbrainz-username" type="text" maxlength="128" placeholder="ListenBrainz username" autocomplete="username" required>
+            <button type="submit">Save</button>
+          </form>
+        </div>
+        <div id="listenbrainz-content"></div>
+      </div>
+      {% endif %}
       <div id="library-results" class="explore-section"></div>
       {% if can_view_logs %}
       <div id="logs-results" class="explore-section logs-section">
@@ -160,13 +185,18 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
-    <nav class="mobile-nav{% if is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
+    <nav class="mobile-nav{% if listenbrainz_enabled and is_admin %} mobile-nav-four{% elif listenbrainz_enabled or is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon">⌕</span><span>Explore</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="library" aria-label="Library" {% if not is_admin %}hidden{% endif %}>
         <span class="mobile-nav-icon">▣</span><span>Library</span>
       </button>
+      {% if listenbrainz_enabled %}
+      <button class="mobile-nav-btn" data-mobile-tab="listenbrainz" aria-label="ListenBrainz">
+        <span class="mobile-nav-icon">LB</span><span>ListenBrainz</span>
+      </button>
+      {% endif %}
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
         <span class="mobile-nav-icon">↓</span><span>Downloads</span>
       </button>
@@ -439,6 +469,7 @@
       const albumsResults = document.getElementById("albums-results");
       const libraryResults = document.getElementById("library-results");
       const logsResults = document.getElementById("logs-results");
+      const listenbrainzResults = document.getElementById("listenbrainz-results");
       let libraryLoaded = false;
       let libraryTracks = [];
       let libraryOffset = 0;
@@ -455,6 +486,7 @@
           albums: "Search albums or paste a URL...",
           library: "Search local files...",
           downloads: "Search downloads...",
+          listenbrainz: "Search music, artists, or albums...",
           logs: "Application logs",
         };
         searchInput.placeholder = placeholders[currentTab] || placeholders.explore;
@@ -488,6 +520,15 @@
         setActiveTab("downloads");
         updateUrlParams("", "downloads");
       });
+
+      const listenbrainzButton = document.getElementById("listenbrainz-btn");
+      if (listenbrainzButton) {
+        listenbrainzButton.addEventListener("click", () => {
+          exitAlbumViewMode();
+          setActiveTab("listenbrainz");
+          updateUrlParams("", "listenbrainz");
+        });
+      }
 
       const logsButton = document.getElementById("logs-btn");
       let activeLogSource = "web";
@@ -753,7 +794,7 @@
       // Initialize tab from URL
       function initTabFromUrl() {
         const tab = getQueryParam("tab") || "explore";
-        if (tab === "songs" || tab === "albums" || tab === "explore" || tab === "library" || tab === "downloads") {
+        if (tab === "songs" || tab === "albums" || tab === "explore" || tab === "library" || tab === "downloads" || (tab === "listenbrainz" && listenbrainzResults)) {
           setActiveTab(tab);
         }
       }
@@ -800,6 +841,7 @@
       }
 
       function setActiveTab(tab, skipExploreLoad = false) {
+        if (tab !== "listenbrainz") closeListenBrainzStream();
         currentTab = tab;
         updateSearchContext();
         document.querySelectorAll(".mobile-nav-btn").forEach((button) => {
@@ -818,6 +860,7 @@
         exploreResults.classList.remove("active");
         libraryResults.classList.remove("active");
         downloadsResults.classList.remove("active");
+        if (listenbrainzResults) listenbrainzResults.classList.remove("active");
         if (logsResults) logsResults.classList.remove("active");
 
         // Suche ist jetzt immer nutzbar, auch im Explore-Zustand
@@ -850,11 +893,141 @@
           downloadsResults.classList.add("active");
           resultTypeToggle.style.display = "none";
           updateQueueUI(queueJobs);
+        } else if (tab === "listenbrainz" && listenbrainzResults) {
+          listenbrainzResults.classList.add("active");
+          resultTypeToggle.style.display = "none";
+          loadListenBrainzContent();
         } else if (tab === "logs" && logsResults) {
           logsResults.classList.add("active");
           resultTypeToggle.style.display = "none";
           loadLogs();
         }
+      }
+
+      let listenbrainzEventSource = null;
+
+      function closeListenBrainzStream() {
+        if (listenbrainzEventSource) {
+          listenbrainzEventSource.close();
+          listenbrainzEventSource = null;
+        }
+      }
+
+      function renderListenBrainzTracks(tracks, title) {
+        const content = document.getElementById("listenbrainz-content");
+        content.innerHTML = `
+          <div class="listenbrainz-playlist-heading">
+            <div>
+              <h3>${escapeHtml(title || "Weekly Exploration")}</h3>
+              <span>${tracks.length} matched songs</span>
+            </div>
+            ${tracks.length ? '<button id="listenbrainz-download-all" class="download-all-btn">Download All</button>' : ""}
+          </div>
+          <div class="explore-tracks-list">
+            ${tracks.map((track) => `
+              <div class="track">
+                <div class="track-main">
+                  <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy">
+                  <div class="track-info">
+                    <div class="track-title">${escapeHtml(track.title)}</div>
+                    <div class="track-artist">${escapeHtml(track.artist)}${track.album ? " - " + escapeHtml(track.album) : ""}</div>
+                    <div class="track-meta"><span class="track-duration">${track.duration || ""}</span></div>
+                  </div>
+                </div>
+                <div class="track-actions">
+                  <button class="play-btn" data-video-id="${track.video_id}" aria-label="Play preview">▶</button>
+                  <button class="download-btn" data-video-id="${track.video_id}" data-title="${escapeHtml(track.title)}" data-artist="${escapeHtml(track.artist)}" data-album="${escapeHtml(track.album || "")}">Download</button>
+                </div>
+              </div>
+            `).join("")}
+          </div>
+        `;
+
+        content.querySelectorAll(".play-btn").forEach((button) => {
+          button.addEventListener("click", () => togglePlay(button.dataset.videoId, button));
+        });
+        content.querySelectorAll(".download-btn").forEach((button) => {
+          button.addEventListener("click", handleDownload);
+        });
+        const downloadAll = document.getElementById("listenbrainz-download-all");
+        if (downloadAll) {
+          downloadAll.addEventListener("click", () => queueMultipleTracks(tracks, downloadAll));
+        }
+        updateQueueUI(queueJobs);
+      }
+
+      async function loadListenBrainzContent() {
+        if (!listenbrainzResults) return;
+        closeListenBrainzStream();
+        const input = document.getElementById("listenbrainz-username");
+        const content = document.getElementById("listenbrainz-content");
+        content.innerHTML = '<div class="listenbrainz-empty">Loading ListenBrainz…</div>';
+
+        try {
+          const response = await fetch("/api/listenbrainz/settings");
+          if (!response.ok) throw new Error("ListenBrainz is unavailable");
+          const settings = await response.json();
+          input.value = settings.username || "";
+          if (!settings.username) {
+            content.innerHTML = '<div class="listenbrainz-empty">Enter your ListenBrainz username to see your personal playlist.</div>';
+            return;
+          }
+        } catch (error) {
+          content.innerHTML = `<div class="listenbrainz-empty">${escapeHtml(error.message)}</div>`;
+          return;
+        }
+
+        content.innerHTML = '<div class="listenbrainz-empty">Matching your playlist with YouTube Music…</div>';
+        const source = new EventSource("/api/listenbrainz/recommendations/stream");
+        listenbrainzEventSource = source;
+        source.addEventListener("progress", (event) => {
+          const progress = JSON.parse(event.data);
+          content.innerHTML = `<div class="listenbrainz-empty">Matching ${progress.processed}/${progress.total} · ${progress.matched} found</div>`;
+        });
+        source.addEventListener("complete", (event) => {
+          const data = JSON.parse(event.data);
+          closeListenBrainzStream();
+          if (!data.playlist_exists) {
+            content.innerHTML = '<div class="listenbrainz-empty">ListenBrainz has not created a playlist for this account yet.</div>';
+            return;
+          }
+          renderListenBrainzTracks(data.results || [], data.playlist_title);
+        });
+        source.addEventListener("failure", (event) => {
+          const data = JSON.parse(event.data);
+          closeListenBrainzStream();
+          content.innerHTML = `<div class="listenbrainz-empty">${escapeHtml(data.message || "Could not load ListenBrainz")}</div>`;
+        });
+        source.onerror = () => {
+          if (listenbrainzEventSource !== source) return;
+          closeListenBrainzStream();
+          content.innerHTML = '<div class="listenbrainz-empty">The ListenBrainz connection failed.</div>';
+        };
+      }
+
+      const listenbrainzSettingsForm = document.getElementById("listenbrainz-settings-form");
+      if (listenbrainzSettingsForm) {
+        listenbrainzSettingsForm.addEventListener("submit", async (event) => {
+          event.preventDefault();
+          const input = document.getElementById("listenbrainz-username");
+          const button = listenbrainzSettingsForm.querySelector('button[type="submit"]');
+          button.disabled = true;
+          try {
+            const response = await fetch("/api/listenbrainz/settings", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ username: input.value.trim() }),
+            });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || "Could not save username");
+            await loadListenBrainzContent();
+          } catch (error) {
+            document.getElementById("listenbrainz-content").innerHTML =
+              `<div class="listenbrainz-empty">${escapeHtml(error.message)}</div>`;
+          } finally {
+            button.disabled = false;
+          }
+        });
       }
 
       // Auto-search on page load

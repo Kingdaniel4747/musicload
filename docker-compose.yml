@@ -11,6 +11,8 @@ services:
     environment:
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
+      # Optional manual ListenBrainz tab (never downloads automatically):
+      # MUSICLOAD_LISTENBRAINZ_WEB: "true"
       # Enable Navidrome login for the complete web interface:
       # NAVIDROME_URL: http://navidrome:4533
       # MUSICLOAD_SESSION_SECRET: replace-with-at-least-32-random-characters
