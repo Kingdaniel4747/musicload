@@ -12,7 +12,7 @@ services:
     environment:
       MUSICLOAD_AUDIO_FORMAT: opus
       MUSICLOAD_ORGANIZATION_MODE: album
-      # Optional manual ListenBrainz tab (never downloads automatically):
+      # Optional ListenBrainz tab with its per-user weekly scheduler:
       # MUSICLOAD_LISTENBRAINZ_WEB: "true"
       # Enable Navidrome login for the complete web interface:
       # NAVIDROME_URL: http://navidrome:4533
@@ -25,22 +25,3 @@ services:
 
     # Nginx Proxy Manager users: uncomment this line and the networks block below.
     # networks: [npm_network]
-
-  # Runs automatically together with the web interface.
-  # Edit the included cron.yaml with your ListenBrainz user and/or YouTube playlists.
-  musicload-cron:
-    # Optional legacy/global scheduler. Start with: docker compose --profile cron up -d
-    profiles: ["cron"]
-    image: ghcr.io/kingdaniel4747/musicload:latest
-    container_name: musicload-cron
-    command: ["musicload", "cron", "--config", "/config/cron.yaml"]
-    volumes:
-      - ./music/folder:/downloads
-      - ./.musicload:/data
-      - ./cron.yaml:/config/cron.yaml:ro
-    environment:
-      MUSICLOAD_AUDIO_FORMAT: opus
-      MUSICLOAD_ORGANIZATION_MODE: album
-      # GOTIFY_URL: https://gotify.example.com
-      # GOTIFY_TOKEN: your-app-token
-    restart: unless-stopped

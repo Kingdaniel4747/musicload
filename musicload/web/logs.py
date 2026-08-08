@@ -1,4 +1,4 @@
-"""Persistent process logs shared by the web and cron containers."""
+"""Persistent process logs for the web container."""
 
 import logging
 from pathlib import Path

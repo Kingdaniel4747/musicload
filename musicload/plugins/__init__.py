@@ -1,1 +1,1 @@
-"""Internal ListenBrainz cron support."""
+"""ListenBrainz integration used by the web interface."""

@@ -50,7 +50,7 @@ flowchart TD
     A["Listen to music in Navidrome"]
     B["Navidrome sends your listening history to ListenBrainz"]
     C["ListenBrainz creates Weekly Exploration"]
-    D["Musicload cron reads the recommendations"]
+    D["Musicload checks at your selected weekday and time"]
     E["New tracks are downloaded automatically"]
     F["Saved as Artist / Album / Track"]
     G["Navidrome scans the music folder"]
@@ -95,7 +95,7 @@ Musicload does not need direct Navidrome API access for any of these workflows. 
 
 1. Connect Navidrome to your ListenBrainz account in Navidrome's settings. Your listening history is then sent to ListenBrainz.
 2. ListenBrainz creates your **Weekly Exploration** recommendations.
-3. Musicload's cron worker reads those recommendations on the schedule you choose and downloads the tracks.
+3. Musicload's web container reads those recommendations on the weekday and time configured in your account and downloads new tracks.
 4. With `MUSICLOAD_ORGANIZATION_MODE: album`, downloads are stored as `Artist/Album/Track` instead of a flat folder.
 5. Navidrome scans the same music folder and adds new files to its library automatically at its next regular scan.
 
@@ -103,42 +103,13 @@ Manual downloads work in exactly the same way: search or explore in Musicload, p
 
 ## Quick start
 
-You need only two files next to each other:
-
-- `docker-compose.yml` — starts Musicload **and** the cron worker together.
-- `cron.yaml` — your ListenBrainz schedule. Start with [`cron.yaml`](cron.yaml).
+You need only `docker-compose.yml`; it starts the single Musicload web container.
 
 In `docker-compose.yml`, set the left side of this volume to your real music folder or NAS path:
 
 ```yaml
 - /mnt/storage/media/Musik:/downloads
 ```
-
-In `cron.yaml`, keep only the ListenBrainz job you want. Example for Weekly Exploration every Monday at 08:00:
-
-```yaml
-playlists: {}
-plugins:
-  listenbrainz-weekly:
-    type: listenbrainz
-    sync: false
-    schedule: "0 8 * * 1"
-    config:
-      user: your_listenbrainz_username
-      recommendation_type: weekly-exploration
-```
-
-Optional YouTube or YouTube Music playlist subscription:
-
-```yaml
-playlists:
-  favorites:
-    url: https://music.youtube.com/playlist?list=YOUR_PLAYLIST_ID
-    sync: false
-    schedule: "0 6 * * *"
-```
-
-The cron worker intentionally supports only these two sources.
 
 Then start everything with one command:
 
@@ -149,7 +120,7 @@ docker compose up -d
 Open `http://SERVER_IP:8000`.
 
 
-Musicload keeps its state, cookies, and cron history in the hidden `.musicload` folder inside your music directory. Do not delete that folder unless you intentionally want to reset Musicload's history.
+Musicload keeps its state, cookies, accounts, and caches in the hidden `.musicload` folder inside your music directory. Do not delete that folder unless you intentionally want to reset Musicload.
 
 ## Navidrome setup
 
@@ -206,7 +177,7 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
-| `MUSICLOAD_DATA_DIR` | `~/.musicload` (`/data` in Docker) | State, cookies, logs, cache, and cron history. Kept separate from downloaded music. |
+| `MUSICLOAD_DATA_DIR` | `~/.musicload` (`/data` in Docker) | State, cookies, logs, and caches. Kept separate from downloaded music. |
 | `NAVIDROME_URL` | unset | Navidrome server used as the login provider. |
 | `MUSICLOAD_SESSION_SECRET` | unset | Secret of at least 32 characters used to sign sessions. |
 | `MUSICLOAD_SESSION_HTTPS_ONLY` | `true` | Send the session cookie only over HTTPS. |
@@ -223,10 +194,8 @@ All settings live directly in `docker-compose.yml`; no `.env` file is required. 
 When the ListenBrainz web tab is enabled, each signed-in user can save a separate
 ListenBrainz username and optionally enable a download check on a selected weekday and local time. Matched
 recommendations and Local Files metadata are persisted under `MUSICLOAD_DATA_DIR`, so
-they remain fast after container restarts. Automatic checks only queue a playlist when
-its matched track set has changed; the standalone cron service remains optional.
-Start the legacy/global cron configuration only when needed with
-`docker compose --profile cron up -d`.
+they remain fast after container restarts. Automatic checks run inside the web container
+and only queue a playlist when its matched track set has changed.
 | `MUSICLOAD_CORS_ORIGINS` | `*` | Allowed browser origins, comma-separated. |
 | `MUSICLOAD_COOKIE_MODE` | `auto` | Cookie usage: `auto`, `always`, or `never`. |
 | `MUSICLOAD_COOKIE_RETRY_DELAY` | `1.0` | Wait time before a cookie retry, in seconds. |

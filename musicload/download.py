@@ -1,6 +1,7 @@
 """Download functionality using yt-dlp."""
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 
 import yt_dlp
@@ -348,7 +349,7 @@ def download(
     album_artist: str | None = None,
     album_year: int | None = None,
     track_number: int | None = None,
-    should_cancel: callable | None = None,
+    should_cancel: Callable[[], bool] | None = None,
     report_existing: bool = False,
 ) -> Path:
     """
@@ -425,7 +426,7 @@ def download(
     # in their artist directory, while real album downloads provide album.
 
     # The index catches the same recording even when it came from another
-    # YouTube video, album page, playlist, or earlier cron run.
+    # YouTube video, album page, playlist, or earlier download.
     indexed = find_existing_download(config.data_dir, video_id, info)
     if indexed:
         logger.info("Skipping (library index): %s - %s", artist, title)

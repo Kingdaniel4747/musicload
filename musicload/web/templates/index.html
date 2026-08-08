@@ -183,7 +183,6 @@
       <div id="logs-results" class="explore-section logs-section">
         <div class="log-source-tabs" role="tablist" aria-label="Log source">
           <button type="button" class="log-source-tab active" data-log-source="web" role="tab">Web</button>
-          <button type="button" class="log-source-tab" data-log-source="cron" role="tab">Cron</button>
         </div>
         <div id="logs-status" class="status"></div>
         <pre id="logs-output" class="logs-output" aria-live="off"></pre>
@@ -548,8 +547,8 @@
 
       const logsButton = document.getElementById("logs-btn");
       let activeLogSource = "web";
-      const logOffsets = { web: 0, cron: 0 };
-      const logContents = { web: "", cron: "" };
+      const logOffsets = { web: 0 };
+      const logContents = { web: "" };
       let logsLoading = false;
       if (logsButton) {
         logsButton.addEventListener("click", () => {
@@ -2181,105 +2180,6 @@
         });
       });
 
-      // --- Cron config generation ---
-
-      // Country code to human-readable name mapping for cron config key generation
-      const COUNTRY_NAMES = {
-        ZZ: "global",
-        US: "united-states",
-        GB: "united-kingdom",
-        DE: "germany",
-        FR: "france",
-        JP: "japan",
-        KR: "south-korea",
-        BR: "brazil",
-        IN: "india",
-        AU: "australia",
-        CA: "canada",
-      };
-
-      function generateCronYaml(type, options) {
-        // Generate a YAML snippet for cron.yaml explore section
-        // type: "charts" or "mood"
-        // options: { country, title, params, playlistId }
-        if (type === "charts") {
-          const country = options.country || "ZZ";
-          const nameBase = COUNTRY_NAMES[country] || country.toLowerCase();
-          const key = nameBase + "-charts";
-          let yaml = `${key}:\n`;
-          yaml += `  type: charts\n`;
-          if (country !== "ZZ") {
-            yaml += `  country: ${country}\n`;
-          }
-          yaml += `  sync: true\n`;
-          yaml += `  schedule: "0 6 * * *"\n`;
-          yaml += `  limit: 10`;
-          return yaml;
-        } else if (type === "mood") {
-          const title = options.title || "mood";
-          const params = options.params || "";
-          const playlistId = options.playlistId || "";
-          // Sanitize title into a valid cron key: lowercase, replace spaces/special chars with dashes
-          const key =
-            title
-              .toLowerCase()
-              .replace(/[^a-z0-9]+/g, "-")
-              .replace(/^-|-$/g, "") || "mood";
-          let yaml = `${key}:\n`;
-          yaml += `  type: mood\n`;
-          yaml += `  params: "${params}"\n`;
-          if (playlistId) {
-            yaml += `  playlist_id: "${playlistId}"\n`;
-          }
-          yaml += `  sync: true\n`;
-          yaml += `  schedule: "0 6 * * *"`;
-          return yaml;
-        } else if (type === "new_releases") {
-          let yaml = `new-releases:\n`;
-          yaml += `  type: new_releases\n`;
-          yaml += `  sync: true\n`;
-          yaml += `  schedule: "0 6 * * *"\n`;
-          yaml += `  limit: 50`;
-          return yaml;
-        }
-        return "";
-      }
-
-      async function copyCronConfig(yamlSnippet, btn) {
-        const originalText = btn.textContent;
-        try {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
-            await navigator.clipboard.writeText(yamlSnippet);
-          } else {
-            // Fallback for older browsers
-            const textarea = document.createElement("textarea");
-            textarea.value = yamlSnippet;
-            textarea.style.position = "fixed";
-            textarea.style.opacity = "0";
-            document.body.appendChild(textarea);
-            textarea.select();
-            const success = document.execCommand("copy");
-            document.body.removeChild(textarea);
-            if (!success) throw new Error("Copy command failed");
-          }
-
-          btn.textContent = "Copied!";
-          btn.classList.add("cron-copied");
-          showStatus("Cron config copied to clipboard");
-          setTimeout(() => {
-            btn.textContent = originalText;
-            btn.classList.remove("cron-copied");
-          }, 2000);
-        } catch (error) {
-          console.error("Failed to copy cron config:", error);
-          btn.textContent = "Failed";
-          showStatus("Failed to copy cron config: " + error.message, true);
-          setTimeout(() => {
-            btn.textContent = originalText;
-          }, 2000);
-        }
-      }
-
       // --- Explore functionality ---
       let exploreLoaded = false;
       let exploreBreadcrumb = []; // tracks navigation: [{type, title, params?}]
@@ -2559,17 +2459,6 @@
           renderExploreHome(cachedMoods, charts, true);
         });
 
-        // Cron config button for charts
-        const cronChartsBtn = document.getElementById("cron-charts-btn");
-        if (cronChartsBtn) {
-          cronChartsBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const country = cronChartsBtn.dataset.country;
-            const yaml = generateCronYaml("charts", { country });
-            copyCronConfig(yaml, cronChartsBtn);
-          });
-        }
-
         // Download all charts
         const chartTracks = charts && charts.tracks ? charts.tracks : [];
         const downloadAllChartsBtn = document.getElementById(
@@ -2586,16 +2475,6 @@
           newReleasesPage += delta;
           renderExploreHome(cachedMoods, charts, true, cachedNewReleases);
         });
-
-        // Cron config button for new releases
-        const cronNewReleasesBtn = document.getElementById("cron-new-releases-btn");
-        if (cronNewReleasesBtn) {
-          cronNewReleasesBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const yaml = generateCronYaml("new_releases", {});
-            copyCronConfig(yaml, cronNewReleasesBtn);
-          });
-        }
 
         // New releases album buttons — show tracks inline in explore tab
         exploreResults.querySelectorAll(".new-release-card .view-album-btn").forEach((btn) => {
@@ -2698,21 +2577,6 @@
             loadExploreContent();
           });
 
-        // Cron config button for mood/genre category
-        const cronMoodBtn = document.getElementById("cron-mood-btn");
-        if (cronMoodBtn) {
-          cronMoodBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const moodParams = cronMoodBtn.dataset.params;
-            const moodTitle = cronMoodBtn.dataset.title;
-            const yaml = generateCronYaml("mood", {
-              params: moodParams,
-              title: moodTitle,
-            });
-            copyCronConfig(yaml, cronMoodBtn);
-          });
-        }
-
         // View playlist tracks
         document.querySelectorAll(".view-playlist-btn").forEach((btn) => {
           btn.addEventListener("click", (e) => {
@@ -2792,7 +2656,7 @@
           playlistId,
         });
 
-        // Extract parent mood params if available for cron config
+        // Preserve the parent mood so breadcrumb navigation can return to it.
         const parentMoodParams =
           prevBreadcrumb.length > 0 && prevBreadcrumb[0].params
             ? prevBreadcrumb[0].params
@@ -2872,23 +2736,6 @@
               prevBreadcrumb[0].params,
               prevBreadcrumb[0].title,
             );
-          });
-        }
-
-        // Cron config button for playlist
-        const cronPlaylistBtn = document.getElementById("cron-playlist-btn");
-        if (cronPlaylistBtn) {
-          cronPlaylistBtn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const moodParams = cronPlaylistBtn.dataset.params;
-            const playlistIdData = cronPlaylistBtn.dataset.playlistId;
-            const playlistTitleData = cronPlaylistBtn.dataset.title;
-            const yaml = generateCronYaml("mood", {
-              params: moodParams,
-              title: playlistTitleData,
-              playlistId: playlistIdData,
-            });
-            copyCronConfig(yaml, cronPlaylistBtn);
           });
         }
 

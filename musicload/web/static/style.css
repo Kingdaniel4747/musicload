@@ -1562,42 +1562,6 @@ body:has(#logs-results.active) .container {
 .chart-trend.trend-down { color: #ef4444; }
 .chart-trend.trend-neutral { color: var(--text-secondary); }
 
-/* Cron config button */
-.cron-btn {
-    padding: 0.5rem 1rem;
-    font-size: 0.9rem;
-    font-weight: 600;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-    min-height: 44px;
-}
-.cron-btn:hover:not(:disabled) {
-    background: var(--accent-primary);
-    color: white;
-    border-color: var(--accent-primary);
-}
-.cron-btn:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-}
-.cron-btn.cron-copied {
-    background: #22c55e;
-    color: white;
-    border-color: #22c55e;
-}
-/* Inline variant for breadcrumb rows */
-.cron-btn-inline {
-    margin-left: auto;
-    padding: 0.3rem 0.75rem;
-    font-size: 0.85rem;
-    min-height: 32px;
-}
-
 /* UGC badge for non-official content */
 .ugc-badge {
     display: inline-block;
@@ -1869,26 +1833,16 @@ body:has(#logs-results.active) .container {
         flex: 1 1 auto;
         min-width: 0;
     }
-    .explore-section-actions .cron-btn {
-        flex: 1 1 auto;
-        min-width: 0;
-    }
-
     /* Chart trend adjustments for very small screens */
     .chart-track .chart-trend {
         min-width: 1rem;
         font-size: 0.75rem;
     }
 
-    /* Breadcrumb: allow wrapping so cron button stays visible */
+    /* Breadcrumb may wrap on narrow screens. */
     .explore-breadcrumb {
         flex-wrap: wrap;
     }
-    .cron-btn-inline {
-        margin-left: 0;
-        flex: 0 0 auto;
-    }
-
     /* Playlist header: wrap on mobile */
     .explore-playlist-header {
         flex-direction: column;
@@ -1899,8 +1853,7 @@ body:has(#logs-results.active) .container {
         flex-wrap: wrap;
         width: 100%;
     }
-    .explore-playlist-header .explore-section-actions .download-all-btn,
-    .explore-playlist-header .explore-section-actions .cron-btn {
+    .explore-playlist-header .explore-section-actions .download-all-btn {
         flex: 1 1 auto;
         min-width: 0;
     }
@@ -2210,7 +2163,7 @@ header h1 .version, header p { display: none; }
     color: #fff;
     transform: none;
 }
-.download-btn, .download-all-btn, .cron-btn, .library-explore-btn,
+.download-btn, .download-all-btn, .library-explore-btn,
 .clear-btn, .cancel-all-btn, .remove-btn, .clear-job-btn, .cancel-job-btn {
     min-height: 2.45rem;
     border: 1px solid var(--accent-primary);
@@ -2220,7 +2173,7 @@ header h1 .version, header p { display: none; }
     font-size: 0.82rem;
     font-weight: 650;
 }
-.download-btn:hover:not(:disabled), .download-all-btn:hover, .cron-btn:hover,
+.download-btn:hover:not(:disabled), .download-all-btn:hover,
 .library-explore-btn:hover, .clear-btn:hover, .cancel-all-btn:hover,
 .remove-btn:hover:not(:disabled), .clear-job-btn:hover, .cancel-job-btn:hover {
     border-color: var(--accent-hover);

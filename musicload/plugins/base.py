@@ -65,7 +65,7 @@ class Plugin(Protocol):
 
     @property
     def name(self) -> str:
-        """Cron source name (currently only 'listenbrainz')."""
+        """Integration source name (currently only 'listenbrainz')."""
         ...
 
     @property

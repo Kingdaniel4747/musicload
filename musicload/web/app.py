@@ -745,10 +745,10 @@ async def api_logs(
     request: Request,
     offset: int = Query(0, ge=0),
 ):
-    """Return raw incremental web or cron log output."""
+    """Return raw incremental web log output."""
     if config.navidrome_url and not request.session.get("is_admin"):
         raise HTTPException(status_code=403, detail="Administrator access required")
-    if source not in {"web", "cron"}:
+    if source != "web":
         raise HTTPException(status_code=404, detail="Unknown log source")
 
     from musicload.web.logs import read_log_chunk

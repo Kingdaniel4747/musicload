@@ -2,6 +2,7 @@
 
 import logging
 import os
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
 from typing import Annotated
@@ -9,7 +10,6 @@ from typing import Annotated
 import typer
 
 from musicload.config import get_config
-from musicload.cron.cli import cron_command
 from musicload.download import UnavailableCooldownError, download, download_url
 from musicload.search import (
     get_charts,
@@ -46,9 +46,6 @@ app = typer.Typer(help="Musicload - Search and download music from YouTube Music
 
 explore_app = typer.Typer(help="Explore moods, genres, and charts on YouTube Music.")
 app.add_typer(explore_app, name="explore")
-
-app.command(name="cron")(cron_command)
-
 
 def _version_callback(value: bool):
     if value:
@@ -378,7 +375,7 @@ def _download_external_url(
     organization_mode: str = "flat",
     use_primary_artist: bool = False,
     source_name: str = "External playlist",
-    get_tracks_from_url: callable | None = None,
+    get_tracks_from_url: Callable | None = None,
     apply_replaygain: bool = False,
 ) -> None:
     """Download tracks from an external playlist source by searching YouTube Music."""

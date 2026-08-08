@@ -642,7 +642,7 @@ def _tag_lyrics(
 ) -> None:
     """Fetch and save lyrics for a single file.
 
-    Uses MetadataCache (same SQLite cache as cron/download) for negative result
+    Uses MetadataCache (the same SQLite cache as downloads) for negative result
     caching with a synthetic 'tag:artist|title' key.
     """
     import time
