@@ -8,7 +8,7 @@
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
     <link rel="manifest" href="/static/manifest.json" />
     <meta name="theme-color" content="#d60932" />
-    <!-- iOS/iPadOS: macht die App im Home-Bildschirm-Modus vollbildig ohne Safari-UI -->
+    <!-- iOS/iPadOS: use the full screen when launched from the Home Screen. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
@@ -452,8 +452,8 @@
         updateClearButtonVisibility();
         searchInput.focus();
 
-        // In der lokalen Bibliothek nur den lokalen Filter zurücksetzen.
-        // Das X darf den Nutzer nicht aus dem Files-Tab herauswerfen.
+        // In the local library, only reset the local filter.
+        // The clear button must not leave the Library tab.
         if (currentTab === "library") {
           showStatus("");
           updateUrlParams("", "library");
@@ -467,7 +467,7 @@
           return;
         }
 
-        // Clear results, zurück zu Explore
+        // Clear results and return to Explore.
         songsResults.innerHTML = "";
         albumsResults.innerHTML = "";
         showStatus("");
@@ -485,7 +485,7 @@
       // Initialize clear button visibility
       updateClearButtonVisibility();
 
-      // Tab management (nur noch Songs/Albums-Umschaltung waehrend der Suche)
+      // Tab management for switching between Songs and Albums during search.
       const tabButtons = document.querySelectorAll(".tab-btn");
       const songsResults = document.getElementById("songs-results");
       const albumsResults = document.getElementById("albums-results");
@@ -887,7 +887,7 @@
         if (listenbrainzResults) listenbrainzResults.classList.remove("active");
         if (logsResults) logsResults.classList.remove("active");
 
-        // Suche ist jetzt immer nutzbar, auch im Explore-Zustand
+        // Search remains available in every view, including Explore.
         searchInput.disabled = false;
         document.getElementById("search-clear-btn").disabled = false;
         document.querySelector("#search-form button[type='submit']").disabled = false;
@@ -1199,7 +1199,7 @@
           return;
         }
 
-        // Default: Explore ist der Startbildschirm, ausser es gibt eine Suchanfrage
+        // Explore is the default view unless a search query is present.
         if (tab === "explore" || !query) {
           const restored = restoreExploreFromUrl();
           if (restored) return;
@@ -1388,7 +1388,7 @@
           return;
         }
 
-        // Beim Suchen von Explore weg zu Songs wechseln (Albums bleibt erhalten, falls aktiv)
+        // Search from Explore in Songs; keep Albums selected when already active.
         const targetTab = (currentTab === "explore" || currentTab === "downloads") ? "songs" : currentTab;
         setActiveTab(targetTab, true);
         updateUrlParams(query, targetTab);
@@ -3120,8 +3120,7 @@
         });
       }
 
-      // Ganz am Ende aufrufen, damit alle let/const-Deklarationen
-      // (z. B. exploreLoaded, exploreBreadcrumb) bereits initialisiert sind.
+      // Run last so all let/const declarations are initialized first.
       initAutoSearch();
     </script>
   </body>

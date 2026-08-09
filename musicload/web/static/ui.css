@@ -125,8 +125,8 @@ header p { display: none; }
   font-size: .86rem;
   font-weight: 650;
 }
-#explore-btn::after { content: "Entdecken"; }
-#library-btn::after { content: "Bibliothek"; }
+#explore-btn::after { content: "Explore"; }
+#library-btn::after { content: "Library"; }
 #listenbrainz-btn::after { content: "ListenBrainz"; }
 #downloads-btn::after { content: "Downloads"; }
 #explore-btn.active, #library-btn.active, #listenbrainz-btn.active, #downloads-btn.active,
@@ -631,7 +631,14 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 
 /* Final alignment pass. */
 @media (min-width: 721px) {
-  .utility-controls { top: 4.05rem; }
+  .utility-controls {
+    position: static;
+    order: -1;
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    margin: 0 0 .85rem;
+  }
   .utility-controls .icon-btn {
     justify-content: center;
     text-align: center;
