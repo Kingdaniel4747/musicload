@@ -1,0 +1,1 @@
+"""Musicload web interface."""

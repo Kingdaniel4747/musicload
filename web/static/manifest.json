@@ -1,0 +1,39 @@
+{
+  "name": "Musicload",
+  "short_name": "Musicload",
+  "description": "Search, download and sync music from YouTube Music",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#d60932",
+  "theme_color": "#d60932",
+  "share_target": {
+    "action": "/",
+    "method": "GET",
+    "params": {
+      "title": "shared_title",
+      "text": "shared_text",
+      "url": "shared_url"
+    }
+  },
+  "icons": [
+    {
+      "src": "/static/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/static/icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ]
+}
