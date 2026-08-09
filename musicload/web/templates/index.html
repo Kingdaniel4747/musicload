@@ -385,11 +385,9 @@
         button.textContent = "⏳";
 
         try {
-          const response = await fetch(`/api/stream-url/${videoId}`);
-          if (!response.ok) throw new Error("Failed to get stream URL");
-          const data = await response.json();
-
           currentAudio = new Audio();
+          currentAudio.playsInline = true;
+          currentAudio.preload = "auto";
           currentPlayingButton = button;
 
           currentAudio.addEventListener("loadedmetadata", () => {
@@ -409,24 +407,20 @@
             stopCurrentAudio();
           });
 
-          // HLS URLs can't be played directly due to CORS; use server proxy
-          if (data.is_hls) {
+          // Mobile browsers require play() to follow the tap directly. Use the
+          // same-origin preview without waiting for stream URL discovery.
+          const useMobilePreview = window.matchMedia("(pointer: coarse)").matches;
+          if (useMobilePreview) {
             currentAudio.src = `/api/preview/${videoId}`;
-            await new Promise((resolve, reject) => {
-              currentAudio.addEventListener("canplay", () => resolve(), {
-                once: true,
-              });
-              currentAudio.addEventListener(
-                "error",
-                () => reject(new Error("Playback failed")),
-                { once: true },
-              );
-            });
             await currentAudio.play();
-          } else {
-            currentAudio.src = data.url;
-            await currentAudio.play();
+            return;
           }
+
+          const response = await fetch(`/api/stream-url/${videoId}`);
+          if (!response.ok) throw new Error("Failed to get stream URL");
+          const data = await response.json();
+          currentAudio.src = data.is_hls ? `/api/preview/${videoId}` : data.url;
+          await currentAudio.play();
         } catch (error) {
           console.error("Failed to play:", error);
           showStatus("Failed to start playback: " + error.message, true);
@@ -3038,7 +3032,14 @@
           });
         }
 
-        document.getElementById("library-explore-btn").addEventListener("click", () => {
+        document.getElementById("library-explore-btn").addEventListener("click", async () => {
+          const query = searchInput.value.trim();
+          if (query) {
+            setActiveTab("songs", true);
+            updateUrlParams(query, "songs");
+            await performSearch(query);
+            return;
+          }
           setActiveTab("explore");
           updateExploreUrlParams("home");
         });
@@ -3063,6 +3064,8 @@
         button.textContent = "⏳";
         try {
           currentAudio = new Audio(`/api/library/play?entry_path=${encodeURIComponent(entryPath)}`);
+          currentAudio.playsInline = true;
+          currentAudio.preload = "auto";
           currentPlayingButton = button;
           currentAudio.addEventListener("canplay", () => {
             button.textContent = "⏸";

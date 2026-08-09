@@ -628,3 +628,22 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
   .search-form { gap: .3rem; padding: .3rem; }
   .search-form .format-selector { width: 4.45rem; min-width: 4.45rem; }
 }
+
+/* Final alignment pass. */
+@media (min-width: 721px) {
+  .utility-controls { top: 4.05rem; }
+  .utility-controls .icon-btn {
+    justify-content: center;
+    text-align: center;
+    line-height: 1;
+  }
+  .utility-controls .icon-btn svg { display: block; margin: 0; }
+  .mini-player { width: min(520px, calc(100vw - 260px)); }
+}
+
+.queue-section .queue-header {
+  min-height: 2.55rem;
+  margin: 0 0 .75rem;
+  align-items: center;
+}
+.queue-section .queue-header-actions { align-self: center; }
