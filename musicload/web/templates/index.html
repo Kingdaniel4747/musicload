@@ -32,15 +32,6 @@
             <p>Search and download music from YouTube Music</p>
           </div>
           <div class="header-controls">
-            <select
-              id="format-selector"
-              class="format-selector"
-              aria-label="Audio format"
-            >
-              <option value="opus">Opus</option>
-              <option value="mp3">MP3</option>
-              <option value="flac">FLAC</option>
-            </select>
             <button
               id="explore-btn"
               class="icon-btn"
@@ -76,6 +67,7 @@
             >
               ⬇
             </button>
+            <div class="utility-controls">
             <button
               id="cookies-btn"
               class="icon-btn"
@@ -101,11 +93,22 @@
               </button>
             </form>
             {% endif %}
+            </div>
           </div>
         </div>
       </header>
 
       <form id="search-form" class="search-form">
+        <select
+          id="format-selector"
+          class="format-selector"
+          aria-label="Audio format"
+          title="Audio format"
+        >
+          <option value="opus">Opus</option>
+          <option value="mp3">MP3</option>
+          <option value="flac">FLAC</option>
+        </select>
         <div class="search-input-wrapper">
           <input
             type="text"
@@ -192,6 +195,7 @@
     </div>
 
     <div id="mini-player" class="mini-player" hidden>
+      <img id="mini-player-cover" class="mini-player-cover" alt="" hidden>
       <div class="mini-player-info">
         <span id="mini-player-title" class="mini-player-title">Playing</span>
         <span id="mini-player-artist" class="mini-player-artist"></span>
@@ -313,6 +317,15 @@
 
       function showMiniPlayer(button) {
         const track = button.closest(".track");
+        const trackCover = track?.querySelector(".track-cover");
+        const miniPlayerCover = document.getElementById("mini-player-cover");
+        if (trackCover?.src) {
+          miniPlayerCover.src = trackCover.src;
+          miniPlayerCover.hidden = false;
+        } else {
+          miniPlayerCover.removeAttribute("src");
+          miniPlayerCover.hidden = true;
+        }
         document.getElementById("mini-player-title").textContent =
           track?.querySelector(".track-title")?.textContent || "Playing";
         document.getElementById("mini-player-artist").textContent =
@@ -363,7 +376,7 @@
 
       async function togglePlay(videoId, button) {
         if (currentPlayingButton === button) {
-          stopCurrentAudio();
+          await toggleMiniPlayer();
           return;
         }
 
@@ -3041,7 +3054,7 @@
 
       async function toggleLocalPlay(entryPath, button) {
         if (currentPlayingButton === button) {
-          stopCurrentAudio();
+          await toggleMiniPlayer();
           return;
         }
 

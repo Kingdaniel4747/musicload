@@ -491,3 +491,140 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
 }
+
+/* Workflow corrections after hands-on review. */
+.utility-controls {
+  position: fixed;
+  z-index: 45;
+  top: 1.35rem;
+  right: clamp(1.4rem, 4vw, 4rem);
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+.utility-controls .icon-btn {
+  display: grid;
+  place-items: center;
+  width: 2.55rem;
+  min-width: 2.55rem;
+  height: 2.55rem;
+  min-height: 2.55rem;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.utility-controls .icon-btn:hover { border-color: var(--border-hover); background: var(--bg-tertiary); color: #fff; }
+.utility-controls .logout-form { display: block; }
+
+.search-form .format-selector {
+  order: initial;
+  width: auto;
+  min-width: 5.7rem;
+  height: 3.35rem;
+  min-height: 3.35rem;
+  margin: 0;
+  padding: 0 1.8rem 0 .8rem;
+  flex: 0 0 auto;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: .78rem;
+  text-align: left;
+}
+
+.mini-player { grid-template-columns: 3.15rem minmax(0, 1fr) auto auto; }
+.mini-player-cover {
+  display: block;
+  width: 3.15rem;
+  height: 3.15rem;
+  border-radius: 10px;
+  background: var(--bg-tertiary);
+  object-fit: cover;
+}
+.mini-player-cover[hidden] { display: none !important; }
+
+/* ListenBrainz uses the exact same row geometry as Explore and Library. */
+#listenbrainz-content .track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+#listenbrainz-content .track-main {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+#listenbrainz-content .track-cover {
+  width: 4rem;
+  height: 4rem;
+  justify-self: start;
+}
+#listenbrainz-content .track-actions { width: auto; justify-content: flex-end; }
+
+@media (max-width: 720px) {
+  .utility-controls {
+    position: static;
+    display: flex;
+    margin-left: auto;
+    gap: .25rem;
+  }
+  .utility-controls .icon-btn {
+    width: 2.35rem;
+    min-width: 2.35rem;
+    height: 2.35rem;
+    min-height: 2.35rem;
+    border-color: transparent;
+    background: transparent;
+  }
+  .search-form {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: stretch;
+    flex-wrap: nowrap;
+  }
+  .search-form .format-selector {
+    display: block;
+    width: 4.75rem;
+    min-width: 4.75rem;
+    height: 3.15rem;
+    min-height: 3.15rem;
+    padding: 0 1.35rem 0 .55rem;
+    font-size: .7rem;
+  }
+  .search-input-wrapper { width: auto; min-width: 0; }
+  .search-form input { min-width: 0; }
+  .queue-header {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: .65rem;
+  }
+  .queue-header-actions { width: auto; flex: 0 0 auto; }
+  .queue-header .cancel-all-btn { white-space: nowrap; }
+  #listenbrainz-content .track {
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+  #listenbrainz-content .track-main {
+    grid-template-columns: 3.45rem minmax(0, 1fr);
+    margin: 0;
+  }
+  #listenbrainz-content .track-cover { width: 3.45rem; height: 3.45rem; }
+  #listenbrainz-content .track-actions { width: auto; }
+  .mini-player { grid-template-columns: 2.9rem minmax(0, 1fr) auto auto; }
+  .mini-player-cover { width: 2.9rem; height: 2.9rem; }
+}
+
+@media (max-width: 390px) {
+  .track-actions .play-btn { display: grid; }
+  #listenbrainz-content .track-actions .play-btn,
+  #library-tracks-list .track-actions .play-btn { display: grid; }
+  .search-form { gap: .3rem; padding: .3rem; }
+  .search-form .format-selector { width: 4.45rem; min-width: 4.45rem; }
+}
