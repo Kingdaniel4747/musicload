@@ -699,13 +699,51 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
   height: 1.2rem;
   overflow: visible;
 }
-.mini-player-toggle svg path {
+.playback-icon-play path {
+  fill: currentColor !important;
+  stroke: none !important;
+}
+.playback-icon-pause path {
   fill: none;
   stroke: currentColor;
   stroke-width: 2.5;
   stroke-linecap: round;
 }
-.mini-player-toggle svg path[fill="currentColor"] { stroke: none; }
+.playback-icon-loading circle {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.25;
+  stroke-linecap: round;
+  stroke-dasharray: 34 16;
+  transform-origin: center;
+  animation: playback-spin .8s linear infinite;
+}
+@keyframes playback-spin { to { transform: rotate(360deg); } }
+
+/* Every track uses the same stable icon geometry as the mini player. */
+.play-btn[data-playback-state] {
+  display: inline-grid;
+  place-items: center;
+  width: 2.5rem;
+  min-width: 2.5rem;
+  height: 2.5rem;
+  min-height: 2.5rem;
+  padding: 0 !important;
+  line-height: 0;
+}
+.play-btn[data-playback-state="pause"],
+.play-btn[data-playback-state="pause"]:hover,
+.play-btn[data-playback-state="pause"]:active {
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none !important;
+  color: #fff !important;
+}
+.play-btn[data-playback-state="pause"]:focus,
+.play-btn[data-playback-state="pause"]:focus-visible {
+  outline: 0 !important;
+  outline-offset: 0 !important;
+}
 
 @media (max-width: 720px) {
   .mini-player {
@@ -763,10 +801,12 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
     border-radius: 0 !important;
     background: transparent !important;
   }
-  #library-results .library-header {
-    display: flex !important;
-    align-items: flex-start !important;
+  #library-results .explore-playlist-header.library-header {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: start !important;
     justify-content: space-between !important;
+    gap: .75rem !important;
     width: 100% !important;
     margin: 0 0 1rem !important;
     padding: 0 !important;
@@ -774,24 +814,33 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
     background: transparent !important;
     text-align: left !important;
   }
-  #library-results .library-header > div {
+  #library-results .explore-playlist-header.library-header > div:first-child {
     display: flex !important;
     flex: 1 1 auto;
     flex-direction: column !important;
     align-items: flex-start !important;
     min-width: 0;
   }
-  #library-results .library-header h2,
+  #library-results .explore-playlist-header.library-header .explore-section-actions {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    width: auto !important;
+    margin: 0 !important;
+  }
+  #library-results .explore-playlist-header.library-header h2,
   #library-results .explore-track-count {
     align-self: flex-start !important;
     margin-left: 0 !important;
     text-align: left !important;
     transform: none !important;
   }
+  #library-results .library-explore-btn { white-space: nowrap; }
   #library-results .explore-track-count { margin-top: .2rem; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .mini-player-text-line.is-overflowing .mini-player-text-track { animation: none; }
   .mini-player-text-line.is-overflowing .mini-player-text-track > span[aria-hidden="true"] { display: none; }
+  .playback-icon-loading circle { animation: none; }
 }

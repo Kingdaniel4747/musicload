@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=mobile-player-2" />
+    <link rel="stylesheet" href="/static/ui.css?v=playback-controls-5" />
   </head>
   <body>
     <div class="container">
@@ -316,15 +316,32 @@
       let currentPlayingButton = null;
 
       const playbackIcons = {
-        play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.5v9l7-4.5z" fill="currentColor"/></svg>',
-        pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7v10M16 7v10"/></svg>',
+        play: '<svg class="playback-icon playback-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11l9-5.5z"/></svg>',
+        pause: '<svg class="playback-icon playback-icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11M16 6.5v11"/></svg>',
+        loading: '<svg class="playback-icon playback-icon-loading" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/></svg>',
       };
 
-      function setPlaybackIcon(button, isPlaying) {
-        button.innerHTML = isPlaying ? playbackIcons.pause : playbackIcons.play;
-        button.dataset.playbackState = isPlaying ? "pause" : "play";
-        button.setAttribute("aria-label", isPlaying ? "Pause playback" : "Resume playback");
+      function setPlaybackButtonState(button, state) {
+        if (!button) return;
+        const nextState = playbackIcons[state] ? state : "play";
+        button.innerHTML = playbackIcons[nextState];
+        button.dataset.playbackState = nextState;
+        const label = nextState === "pause" ? "Pause playback" : nextState === "loading" ? "Loading playback" : "Play playback";
+        button.setAttribute("aria-label", label);
       }
+
+      function initializePlaybackButtons(root = document) {
+        if (root.matches?.(".play-btn")) setPlaybackButtonState(root, "play");
+        root.querySelectorAll?.(".play-btn").forEach((button) => setPlaybackButtonState(button, "play"));
+      }
+
+      const playbackButtonObserver = new MutationObserver((mutations) => {
+        mutations.forEach((mutation) => mutation.addedNodes.forEach((node) => {
+          if (node.nodeType === Node.ELEMENT_NODE) initializePlaybackButtons(node);
+        }));
+      });
+      playbackButtonObserver.observe(document.body, { childList: true, subtree: true });
+      initializePlaybackButtons();
 
       function setMiniPlayerText(id, text) {
         const line = document.getElementById(id);
@@ -363,17 +380,18 @@
         }
         setMiniPlayerText("mini-player-title", track?.querySelector(".track-title")?.textContent || "Playing");
         setMiniPlayerText("mini-player-artist", track?.querySelector(".track-artist")?.textContent || "");
-        setPlaybackIcon(document.getElementById("mini-player-toggle"), true);
-        document.getElementById("mini-player-toggle").title = "Pause";
+        const isPlaying = Boolean(currentAudio && !currentAudio.paused);
+        setPlaybackButtonState(document.getElementById("mini-player-toggle"), isPlaying ? "pause" : "play");
+        document.getElementById("mini-player-toggle").title = isPlaying ? "Pause" : "Resume";
         document.getElementById("mini-player").hidden = false;
       }
 
       function setPlayingVisual(isPlaying) {
         if (!currentPlayingButton) return;
-        setPlaybackIcon(currentPlayingButton, isPlaying);
+        setPlaybackButtonState(currentPlayingButton, isPlaying ? "pause" : "play");
         currentPlayingButton.closest(".track")?.classList.toggle("is-playing", isPlaying);
         const toggle = document.getElementById("mini-player-toggle");
-        setPlaybackIcon(toggle, isPlaying);
+        setPlaybackButtonState(toggle, isPlaying ? "pause" : "play");
         toggle.title = isPlaying ? "Pause" : "Resume";
       }
 
@@ -384,7 +402,7 @@
         }
         if (currentPlayingButton) {
           currentPlayingButton.closest(".track")?.classList.remove("is-playing");
-          setPlaybackIcon(currentPlayingButton, false);
+          setPlaybackButtonState(currentPlayingButton, "play");
           currentPlayingButton.disabled = false;
           currentPlayingButton = null;
         }
@@ -415,7 +433,7 @@
 
         stopCurrentAudio();
         button.disabled = true;
-        button.textContent = "⏳";
+        setPlaybackButtonState(button, "loading");
 
         try {
           currentAudio = new Audio();
@@ -424,9 +442,10 @@
           currentPlayingButton = button;
 
           currentAudio.addEventListener("loadedmetadata", () => {
-            button.textContent = "⏸";
+            const isPlaying = !currentAudio.paused;
+            setPlaybackButtonState(button, isPlaying ? "pause" : "play");
             button.disabled = false;
-            button.closest(".track")?.classList.add("is-playing");
+            button.closest(".track")?.classList.toggle("is-playing", isPlaying);
             showMiniPlayer(button);
           });
 
@@ -457,7 +476,7 @@
         } catch (error) {
           console.error("Failed to play:", error);
           showStatus("Failed to start playback: " + error.message, true);
-          button.textContent = "▶";
+          setPlaybackButtonState(button, "play");
           button.disabled = false;
         }
       }
@@ -3009,7 +3028,7 @@
 
       function renderLibraryTracks() {
         let html = `
-          <div class="explore-playlist-header">
+          <div class="explore-playlist-header library-header">
             <div>
               <h2>Local Library</h2>
               <span class="explore-track-count">${libraryTracks.length} / ${libraryTotal} files${searchInput.value.trim() ? " matching your search" : ""}</span>
@@ -3094,16 +3113,17 @@
 
         stopCurrentAudio();
         button.disabled = true;
-        button.textContent = "⏳";
+        setPlaybackButtonState(button, "loading");
         try {
           currentAudio = new Audio(`/api/library/play?entry_path=${encodeURIComponent(entryPath)}`);
           currentAudio.playsInline = true;
           currentAudio.preload = "auto";
           currentPlayingButton = button;
           currentAudio.addEventListener("canplay", () => {
-            button.textContent = "⏸";
+            const isPlaying = !currentAudio.paused;
+            setPlaybackButtonState(button, isPlaying ? "pause" : "play");
             button.disabled = false;
-            button.closest(".track")?.classList.add("is-playing");
+            button.closest(".track")?.classList.toggle("is-playing", isPlaying);
             showMiniPlayer(button);
           }, { once: true });
           currentAudio.addEventListener("ended", stopCurrentAudio, { once: true });
