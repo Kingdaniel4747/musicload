@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css" />
+    <link rel="stylesheet" href="/static/ui.css?v=mobile-player-2" />
   </head>
   <body>
     <div class="container">
@@ -350,12 +350,16 @@
         const track = button.closest(".track");
         const trackCover = track?.querySelector(".track-cover");
         const miniPlayerCover = document.getElementById("mini-player-cover");
+        miniPlayerCover.onerror = () => {
+          miniPlayerCover.onerror = null;
+          miniPlayerCover.src = "/static/musicload-mark.svg";
+        };
         if (trackCover?.src) {
           miniPlayerCover.src = trackCover.src;
           miniPlayerCover.hidden = false;
         } else {
-          miniPlayerCover.removeAttribute("src");
-          miniPlayerCover.hidden = true;
+          miniPlayerCover.src = "/static/musicload-mark.svg";
+          miniPlayerCover.hidden = false;
         }
         setMiniPlayerText("mini-player-title", track?.querySelector(".track-title")?.textContent || "Playing");
         setMiniPlayerText("mini-player-artist", track?.querySelector(".track-artist")?.textContent || "");

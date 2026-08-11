@@ -708,32 +708,85 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 .mini-player-toggle svg path[fill="currentColor"] { stroke: none; }
 
 @media (max-width: 720px) {
+  .mini-player {
+    grid-template-columns: 2.9rem minmax(0, 1fr) 2.55rem 2.55rem !important;
+    align-items: center !important;
+    box-sizing: border-box;
+    width: calc(100% - 1.5rem) !important;
+    max-width: none !important;
+    height: auto !important;
+    min-height: 4.2rem !important;
+    margin-inline: 0;
+    padding: .6rem .65rem !important;
+    overflow: hidden !important;
+    border: 1px solid var(--border-color) !important;
+    border-radius: var(--card-radius) !important;
+    background: rgba(23, 23, 27, .97) !important;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, .55) !important;
+  }
+  .mini-player-cover {
+    display: block !important;
+    width: 2.9rem !important;
+    height: 2.9rem !important;
+    min-width: 2.9rem;
+    border-radius: 9px !important;
+    object-fit: cover;
+  }
+  .mini-player-info {
+    display: flex !important;
+    width: 100% !important;
+    min-width: 0 !important;
+  }
   .mini-player-toggle,
   .mini-player-toggle:hover,
   .mini-player-toggle:active {
-    border-color: transparent;
-    background: transparent;
-    box-shadow: none;
-    color: #fff;
+    display: grid !important;
+    place-items: center !important;
+    width: 2.55rem !important;
+    min-width: 2.55rem !important;
+    height: 2.55rem !important;
+    min-height: 2.55rem !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    color: #fff !important;
   }
-  .mini-player {
-    box-sizing: border-box;
-    width: calc(100% - 1.5rem);
-    max-width: none;
-    margin-inline: 0;
+  .mini-player-stop {
+    display: grid !important;
+    place-items: center !important;
+    width: 2.55rem !important;
+    height: 2.55rem !important;
+    padding: 0 !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    background: transparent !important;
   }
   #library-results .library-header {
-    align-items: flex-start;
-    margin-top: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    text-align: left;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: space-between !important;
+    width: 100% !important;
+    margin: 0 0 1rem !important;
+    padding: 0 !important;
+    border: 0 !important;
+    background: transparent !important;
+    text-align: left !important;
   }
   #library-results .library-header > div {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
+    display: flex !important;
+    flex: 1 1 auto;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    min-width: 0;
+  }
+  #library-results .library-header h2,
+  #library-results .explore-track-count {
+    align-self: flex-start !important;
+    margin-left: 0 !important;
+    text-align: left !important;
+    transform: none !important;
   }
   #library-results .explore-track-count { margin-top: .2rem; }
 }
