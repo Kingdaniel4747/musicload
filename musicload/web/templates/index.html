@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=stability-performance-2" />
+    <link rel="stylesheet" href="/static/ui.css?v=stability-performance-3" />
   </head>
   <body>
     <div class="container">
@@ -436,24 +436,27 @@
         setPlaybackButtonState(button, "loading");
 
         try {
-          currentAudio = new Audio();
-          currentAudio.playsInline = true;
-          currentAudio.preload = "auto";
+          const audio = new Audio();
+          audio.playsInline = true;
+          audio.preload = "auto";
+          currentAudio = audio;
           currentPlayingButton = button;
 
-          currentAudio.addEventListener("loadedmetadata", () => {
-            const isPlaying = !currentAudio.paused;
+          audio.addEventListener("loadedmetadata", () => {
+            if (currentAudio !== audio) return;
+            const isPlaying = !audio.paused;
             setPlaybackButtonState(button, isPlaying ? "pause" : "play");
             button.disabled = false;
             button.closest(".track")?.classList.toggle("is-playing", isPlaying);
             showMiniPlayer(button);
           });
 
-          currentAudio.addEventListener("ended", () => {
-            stopCurrentAudio();
+          audio.addEventListener("ended", () => {
+            if (currentAudio === audio) stopCurrentAudio();
           });
 
-          currentAudio.addEventListener("error", (e) => {
+          audio.addEventListener("error", (e) => {
+            if (currentAudio !== audio) return;
             console.error("Audio playback error:", e);
             showStatus("Playback failed", true);
             stopCurrentAudio();
@@ -463,23 +466,31 @@
           // same-origin preview without waiting for stream URL discovery.
           const useMobilePreview = window.matchMedia("(pointer: coarse)").matches;
           if (useMobilePreview) {
-            currentAudio.src = `/api/preview/${videoId}`;
+            audio.src = `/api/preview/${videoId}`;
             showMiniPlayer(button);
-            await currentAudio.play();
+            await audio.play();
+            if (currentAudio !== audio) return;
+            button.disabled = false;
             setPlayingVisual(true);
+            showMiniPlayer(button);
             return;
           }
 
           const response = await fetch(`/api/stream-url/${videoId}`);
           if (!response.ok) throw new Error("Failed to get stream URL");
           const data = await response.json();
-          currentAudio.src = data.is_hls ? `/api/preview/${videoId}` : data.url;
-          await currentAudio.play();
+          if (currentAudio !== audio) return;
+          audio.src = data.is_hls ? `/api/preview/${videoId}` : data.url;
+          await audio.play();
+          if (currentAudio !== audio) return;
+          button.disabled = false;
+          setPlayingVisual(true);
+          showMiniPlayer(button);
         } catch (error) {
+          if (currentPlayingButton !== button) return;
           console.error("Failed to play:", error);
           showStatus("Failed to start playback: " + error.message, true);
-          setPlaybackButtonState(button, "play");
-          button.disabled = false;
+          stopCurrentAudio();
         }
       }
 
@@ -2388,10 +2399,10 @@
                                         <div class="track-meta">
                                             ${track.duration ? `<span class="track-duration">${track.duration}</span>` : ""}
                                             ${track.view_count ? `<span class="track-views">${track.view_count} views</span>` : ""}
+                                            ${track.trend ? `<span class="chart-trend trend-${track.trend}">${track.trend === "up" ? "&#9650;" : track.trend === "down" ? "&#9660;" : "&#8212;"}</span>` : ""}
                                         </div>
                                     </div>
                                 </div>
-                                ${track.trend ? `<span class="chart-trend trend-${track.trend}">${track.trend === "up" ? "&#9650;" : track.trend === "down" ? "&#9660;" : "&#8212;"}</span>` : ""}
                                 <div class="track-actions">
                                     <button class="play-btn" data-video-id="${track.video_id}" aria-label="Play preview">&#9654;</button>
                                     <button class="download-btn" data-video-id="${track.video_id}" data-title="${escapeHtml(track.title)}" data-artist="${escapeHtml(track.artist)}">Download</button>

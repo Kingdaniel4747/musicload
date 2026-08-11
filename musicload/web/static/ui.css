@@ -919,12 +919,14 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
 }
 
 /* Search results use the same fixed cover/text/action geometry as Library. */
-#songs-results .track {
+#songs-results .track,
+.chart-tracks-list .track {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
 }
-#songs-results .track-main {
+#songs-results .track-main,
+.chart-tracks-list .track-main {
   display: grid;
   grid-template-columns: 4rem minmax(0, 1fr);
   align-items: center;
@@ -932,21 +934,26 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   min-width: 0;
   margin: 0;
 }
-#songs-results .track-cover {
+#songs-results .track-cover,
+.chart-tracks-list .track-cover {
   width: 4rem;
   height: 4rem;
   justify-self: start;
   object-fit: cover;
 }
-#songs-results .track-actions {
+#songs-results .track-actions,
+.chart-tracks-list .track-actions {
   width: auto;
   justify-content: flex-end;
 }
 @media (max-width: 720px) {
-  #songs-results .track-main {
+  #songs-results .track-main,
+  .chart-tracks-list .track-main {
     grid-template-columns: 3.45rem minmax(0, 1fr);
     margin: 0;
   }
-  #songs-results .track-cover { width: 3.45rem; height: 3.45rem; }
-  #songs-results .track-actions { width: auto; }
+  #songs-results .track-cover,
+  .chart-tracks-list .track-cover { width: 3.45rem; height: 3.45rem; }
+  #songs-results .track-actions,
+  .chart-tracks-list .track-actions { width: auto; }
 }
