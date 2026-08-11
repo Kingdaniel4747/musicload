@@ -917,3 +917,36 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   background: var(--accent-primary);
   transition: width 180ms ease-out;
 }
+
+/* Search results use the same fixed cover/text/action geometry as Library. */
+#songs-results .track {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+#songs-results .track-main {
+  display: grid;
+  grid-template-columns: 4rem minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+#songs-results .track-cover {
+  width: 4rem;
+  height: 4rem;
+  justify-self: start;
+  object-fit: cover;
+}
+#songs-results .track-actions {
+  width: auto;
+  justify-content: flex-end;
+}
+@media (max-width: 720px) {
+  #songs-results .track-main {
+    grid-template-columns: 3.45rem minmax(0, 1fr);
+    margin: 0;
+  }
+  #songs-results .track-cover { width: 3.45rem; height: 3.45rem; }
+  #songs-results .track-actions { width: auto; }
+}

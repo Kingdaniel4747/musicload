@@ -8,7 +8,6 @@ from datetime import datetime
 from typing import Optional
 
 from musicload.config import get_config
-from musicload.download import DownloadCancelledError, ExistingDownloadError, download
 from musicload.models.queue import DownloadJob, JobStatus
 from musicload.playlist import add_to_m3u
 
@@ -166,6 +165,12 @@ class QueueManager:
         Args:
             job: The job to process
         """
+        from musicload.download import (
+            DownloadCancelledError,
+            ExistingDownloadError,
+            download,
+        )
+
         logger.info("Processing job: %s - %s (id=%s)", job.artist, job.title, job.id)
         async with self._jobs_lock:
             existing_job = self.jobs.get(job.id)

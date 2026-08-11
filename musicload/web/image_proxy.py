@@ -17,8 +17,10 @@ ALLOWED_HOSTS: frozenset[str] = frozenset({
     "yt3.googleusercontent.com",
 })
 
-_MAX_CACHE_ENTRIES = 500
+_MAX_CACHE_ENTRIES = 160
 _CACHE_TTL_SECONDS = 3600  # 1 hour
+_MAX_CACHE_BYTES = 32 * 1024 * 1024
+_MAX_IMAGE_BYTES = 8 * 1024 * 1024
 _MAX_CONCURRENT_FETCHES = 5
 _FETCH_TIMEOUT_SECONDS = 10
 
@@ -45,10 +47,17 @@ def validate_image_url(url: str) -> str | None:
 class ImageCache:
     """LRU cache for fetched image data with TTL-based expiry."""
 
-    def __init__(self, max_entries: int = _MAX_CACHE_ENTRIES, ttl: int = _CACHE_TTL_SECONDS):
+    def __init__(
+        self,
+        max_entries: int = _MAX_CACHE_ENTRIES,
+        ttl: int = _CACHE_TTL_SECONDS,
+        max_bytes: int = _MAX_CACHE_BYTES,
+    ):
         self._cache: OrderedDict[str, tuple[bytes, str, float]] = OrderedDict()
         self._max_entries = max_entries
         self._ttl = ttl
+        self._max_bytes = max_bytes
+        self._size_bytes = 0
 
     def get(self, url: str) -> tuple[bytes, str] | None:
         """Return (data, content_type) if cached and not expired, else None."""
@@ -58,6 +67,7 @@ class ImageCache:
 
         data, content_type, timestamp = entry
         if time.monotonic() - timestamp > self._ttl:
+            self._size_bytes -= len(data)
             del self._cache[url]
             return None
 
@@ -67,15 +77,25 @@ class ImageCache:
 
     def put(self, url: str, data: bytes, content_type: str) -> None:
         """Cache image data, evicting oldest entry if at capacity."""
+        if len(data) > self._max_bytes:
+            return
         if url in self._cache:
+            previous_data = self._cache[url][0]
+            self._size_bytes -= len(previous_data)
             self._cache.move_to_end(url)
             self._cache[url] = (data, content_type, time.monotonic())
+            self._size_bytes += len(data)
             return
 
-        if len(self._cache) >= self._max_entries:
-            self._cache.popitem(last=False)
+        while self._cache and (
+            len(self._cache) >= self._max_entries
+            or self._size_bytes + len(data) > self._max_bytes
+        ):
+            _, (evicted_data, _, _) = self._cache.popitem(last=False)
+            self._size_bytes -= len(evicted_data)
 
         self._cache[url] = (data, content_type, time.monotonic())
+        self._size_bytes += len(data)
 
 
 class ImageProxyService:
@@ -109,11 +129,17 @@ class ImageProxyService:
             response = await self._client.get(url)
             response.raise_for_status()
 
+            content_length = response.headers.get("content-length")
+            if content_length and int(content_length) > _MAX_IMAGE_BYTES:
+                raise ValueError("Image response is too large")
+
             content_type = response.headers.get("content-type", "")
             if not content_type.startswith("image/"):
                 raise ValueError(f"Response is not an image: {content_type}")
 
             data = response.content
+            if len(data) > _MAX_IMAGE_BYTES:
+                raise ValueError("Image response is too large")
             self._cache.put(url, data, content_type)
             return data, content_type
 

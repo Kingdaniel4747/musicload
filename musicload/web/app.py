@@ -10,7 +10,6 @@ import urllib.parse
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 
-import yt_dlp
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,13 +21,11 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from musicload import __version__
 from musicload.config import get_config
-from musicload.download import download
 from musicload.playlist import add_to_m3u, read_m3u, remove_from_m3u
 from musicload.queue import QueueManager
 from musicload.search import search
 from musicload.web.api_cache import TtlCache
 from musicload.web.image_proxy import ImageProxyService, validate_image_url
-from musicload.yt_dlp_wrapper import extract_info_with_retry
 
 app = FastAPI(title="Musicload", description="Search and download music from YouTube Music")
 logger = logging.getLogger(__name__)
@@ -52,15 +49,15 @@ _library_metadata_cache: dict[str, tuple[float, int, dict]] = {}
 _image_proxy: ImageProxyService | None = None
 
 # API response caches (TTL in seconds)
-_search_cache = TtlCache(max_entries=200, ttl_seconds=300)        # 5 min
-_album_search_cache = TtlCache(max_entries=200, ttl_seconds=300)  # 5 min
-_album_tracks_cache = TtlCache(max_entries=100, ttl_seconds=900)  # 15 min
+_search_cache = TtlCache(max_entries=100, ttl_seconds=300)        # 5 min
+_album_search_cache = TtlCache(max_entries=100, ttl_seconds=300)  # 5 min
+_album_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)   # 15 min
 _moods_cache = TtlCache(max_entries=1, ttl_seconds=3600)          # 1 hour
-_mood_playlists_cache = TtlCache(max_entries=50, ttl_seconds=1800)  # 30 min
-_charts_cache = TtlCache(max_entries=20, ttl_seconds=1800)        # 30 min
-_playlist_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)  # 15 min
+_mood_playlists_cache = TtlCache(max_entries=25, ttl_seconds=1800)  # 30 min
+_charts_cache = TtlCache(max_entries=10, ttl_seconds=1800)        # 30 min
+_playlist_tracks_cache = TtlCache(max_entries=25, ttl_seconds=900)  # 15 min
 _new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
-_stream_url_cache = TtlCache(max_entries=100, ttl_seconds=300)     # 5 min
+_stream_url_cache = TtlCache(max_entries=50, ttl_seconds=300)      # 5 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -1266,7 +1263,10 @@ async def api_download(request: DownloadRequest, http_request: Request):
         )
 
     try:
-        audio_path = download(
+        from musicload.download import download
+
+        audio_path = await asyncio.to_thread(
+            download,
             video_id=request.video_id,
             output_dir=config.download_dir,
             audio_format=audio_format,
@@ -1366,6 +1366,8 @@ _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
 def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool]:
     """Resolve one direct audio URL off the event loop."""
+    from musicload.yt_dlp_wrapper import extract_info_with_retry
+
     youtube_url = f"https://music.youtube.com/watch?v={video_id}"
     ydl_opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True}
     info = extract_info_with_retry(
