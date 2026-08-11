@@ -8,6 +8,7 @@ import mimetypes
 import re
 import urllib.parse
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 
 import yt_dlp
 import httpx
@@ -37,7 +38,7 @@ config = get_config()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.cors_origins,
-    allow_credentials=True,
+    allow_credentials=config.cors_origins != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -59,6 +60,7 @@ _mood_playlists_cache = TtlCache(max_entries=50, ttl_seconds=1800)  # 30 min
 _charts_cache = TtlCache(max_entries=20, ttl_seconds=1800)        # 30 min
 _playlist_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)  # 15 min
 _new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
+_stream_url_cache = TtlCache(max_entries=100, ttl_seconds=300)     # 5 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -90,6 +92,20 @@ async def require_navidrome_login(request: Request, call_next):
         return JSONResponse({"detail": "Authentication required"}, status_code=401)
     next_path = urllib.parse.quote(request.url.path, safe="/")
     return RedirectResponse(f"/login?next={next_path}", status_code=303)
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    """Apply low-risk browser hardening headers to every response."""
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+    return response
 
 
 if config.navidrome_url:
@@ -548,7 +564,10 @@ async def api_save_listenbrainz_settings(
     }
 
 
-async def _refresh_listenbrainz_recommendations(username: str) -> dict:
+async def _refresh_listenbrainz_recommendations(
+    username: str,
+    progress_callback: Callable[[dict], Awaitable[None]] | None = None,
+) -> dict:
     """Fetch, match, and persist one user's weekly recommendations."""
     from musicload.plugins.base import PluginConfig
     from musicload.plugins.listenbrainz import ListenbrainzPlugin
@@ -577,15 +596,47 @@ async def _refresh_listenbrainz_recommendations(username: str) -> dict:
         else:
             raise
 
-    results = []
-    for song in songs:
+    total = len(songs)
+    processed = 0
+    indexed_results: list[tuple[int, dict]] = []
+    semaphore = asyncio.Semaphore(4)
+
+    async def match_song(index: int, song) -> tuple[int, dict | None]:
         try:
-            matches = await asyncio.to_thread(search, song.search_query, 1)
+            async with semaphore:
+                matches = await asyncio.to_thread(search, song.search_query, 1)
         except Exception as error:
             logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
             matches = []
-        if matches:
-            results.append(_track_to_response(matches[0]).model_dump())
+        return index, _track_to_response(matches[0]).model_dump() if matches else None
+
+    tasks = [
+        asyncio.create_task(match_song(index, song))
+        for index, song in enumerate(songs)
+    ]
+    try:
+        for completed in asyncio.as_completed(tasks):
+            index, result = await completed
+            processed += 1
+            if result is not None:
+                indexed_results.append((index, result))
+            if progress_callback:
+                await progress_callback(
+                    {
+                        "processed": processed,
+                        "total": total,
+                        "matched": len(indexed_results),
+                        "percent": round(processed * 100 / total) if total else 100,
+                    }
+                )
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    results = [result for _, result in sorted(indexed_results)]
 
     payload = {
         "playlist_exists": bool(songs),
@@ -627,8 +678,24 @@ async def api_listenbrainz_recommendations_stream(request: Request):
             get_cached_recommendations, config.data_dir, username
         )
         if payload is None:
+            progress_queue: asyncio.Queue[dict] = asyncio.Queue()
+            refresh_task = asyncio.create_task(
+                _refresh_listenbrainz_recommendations(username, progress_queue.put)
+            )
             try:
-                payload = await _refresh_listenbrainz_recommendations(username)
+                while not refresh_task.done():
+                    try:
+                        progress = await asyncio.wait_for(progress_queue.get(), timeout=10)
+                        yield _sse_event("progress", progress)
+                    except asyncio.TimeoutError:
+                        yield ": keep-alive\n\n"
+                while not progress_queue.empty():
+                    yield _sse_event("progress", progress_queue.get_nowait())
+                payload = await refresh_task
+            except asyncio.CancelledError:
+                refresh_task.cancel()
+                await asyncio.gather(refresh_task, return_exceptions=True)
+                raise
             except Exception as error:
                 logger.warning("ListenBrainz web fetch failed for %s: %s", username, error)
                 yield _sse_event("failure", {"message": str(error)})
@@ -643,15 +710,29 @@ async def api_listenbrainz_recommendations_stream(request: Request):
 
 
 async def _warm_listenbrainz_caches() -> None:
-    """Refresh persistent ListenBrainz caches at startup and every six hours."""
+    """Refresh only stale ListenBrainz caches, then sleep for six hours."""
     if not config.listenbrainz_web:
         return
-    from musicload.web.listenbrainz_settings import list_listenbrainz_settings
+    from datetime import UTC, datetime, timedelta
+    from musicload.web.listenbrainz_settings import (
+        get_cached_recommendations,
+        list_listenbrainz_settings,
+    )
 
     while True:
         settings = await asyncio.to_thread(list_listenbrainz_settings, config.data_dir)
         for item in settings:
             try:
+                cached = await asyncio.to_thread(
+                    get_cached_recommendations, config.data_dir, item["username"]
+                )
+                if cached and cached.get("cached_at"):
+                    try:
+                        cached_at = datetime.fromisoformat(cached["cached_at"])
+                        if datetime.now(UTC) - cached_at < timedelta(hours=6):
+                            continue
+                    except (TypeError, ValueError):
+                        logger.info("Ignoring invalid ListenBrainz cache timestamp")
                 await _refresh_listenbrainz_recommendations(item["username"])
             except asyncio.CancelledError:
                 raise
@@ -673,12 +754,14 @@ async def _listenbrainz_scheduler() -> None:
         mark_listenbrainz_run,
     )
 
+    poll_seconds = 60
     while True:
         try:
-            await asyncio.sleep(20)
+            await asyncio.sleep(poll_seconds)
             if not queue_manager:
                 continue
             settings = await asyncio.to_thread(list_listenbrainz_settings, config.data_dir)
+            poll_seconds = 60 if any(item["auto_download"] for item in settings) else 300
             for item in settings:
                 if not item["auto_download"]:
                     continue
@@ -1278,49 +1361,59 @@ async def download_file(file_path: str):
         raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
+_VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+
+
+def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool]:
+    """Resolve one direct audio URL off the event loop."""
+    youtube_url = f"https://music.youtube.com/watch?v={video_id}"
+    ydl_opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True}
+    info = extract_info_with_retry(
+        ydl_opts=ydl_opts,
+        url=youtube_url,
+        download=False,
+        cookie_file=config.cookie_file_path,
+        config=config,
+    )
+    if "url" in info:
+        stream_url = info["url"]
+    else:
+        audio_formats = [
+            item
+            for item in info.get("formats", [])
+            if item.get("acodec") != "none" and item.get("url")
+        ]
+        if not audio_formats:
+            raise ValueError("No audio stream found")
+        stream_url = max(audio_formats, key=lambda item: item.get("abr") or 0)["url"]
+    is_hls = info.get("protocol") == "m3u8_native" or ".m3u8" in stream_url
+    return stream_url, is_hls
+
+
+async def _resolve_audio_stream(video_id: str) -> tuple[str, bool]:
+    if not _VIDEO_ID_RE.fullmatch(video_id):
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+    cached = _stream_url_cache.get(video_id)
+    if cached is not None:
+        return cached
+    try:
+        resolved = await asyncio.to_thread(_resolve_audio_stream_sync, video_id)
+    except Exception as error:
+        raise HTTPException(status_code=502, detail="Failed to resolve audio stream") from error
+    _stream_url_cache.put(video_id, resolved)
+    return resolved
+
+
 @app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
 async def get_stream_url(video_id: str):
-    """Get direct stream URL for a video using yt-dlp."""
-    config = get_config()
-    try:
-        youtube_url = f"https://music.youtube.com/watch?v={video_id}"
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-        }
-
-        info = extract_info_with_retry(
-            ydl_opts=ydl_opts,
-            url=youtube_url,
-            download=False,
-            cookie_file=config.cookie_file_path,
-            config=config,
-        )
-
-        # Extract direct audio URL
-        if 'url' in info:
-            stream_url = info['url']
-        elif 'formats' in info:
-            audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-            if audio_formats:
-                audio_formats.sort(key=lambda f: f.get('abr', 0), reverse=True)
-                stream_url = audio_formats[0]['url']
-            else:
-                raise HTTPException(status_code=404, detail="No audio stream found")
-        else:
-            raise HTTPException(status_code=404, detail="No stream URL available")
-
-        is_hls = info.get('protocol', '') == 'm3u8_native' or '.m3u8' in stream_url
-
-        return StreamUrlResponse(
-            video_id=video_id,
-            url=stream_url,
-            expires_in=21600,
-            is_hls=is_hls,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get stream URL: {str(e)}")
+    """Get a cached direct stream URL without blocking the event loop."""
+    stream_url, is_hls = await _resolve_audio_stream(video_id)
+    return StreamUrlResponse(
+        video_id=video_id,
+        url=stream_url,
+        expires_in=300,
+        is_hls=is_hls,
+    )
 
 
 @app.get("/api/preview/{video_id}")
@@ -1330,41 +1423,7 @@ async def preview_audio(video_id: str):
     Uses yt-dlp to resolve the stream URL, then ffmpeg to remux HLS into
     a fragmented MP4 that the browser can play progressively.
     """
-    if not re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
-        raise HTTPException(status_code=400, detail="Invalid video ID")
-
-    config = get_config()
-    youtube_url = f"https://music.youtube.com/watch?v={video_id}"
-
-    try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'quiet': True,
-            'no_warnings': True,
-        }
-        info = extract_info_with_retry(
-            ydl_opts=ydl_opts,
-            url=youtube_url,
-            download=False,
-            cookie_file=config.cookie_file_path,
-            config=config,
-        )
-
-        if 'url' in info:
-            stream_url = info['url']
-        elif 'formats' in info:
-            audio_formats = [f for f in info['formats'] if f.get('acodec') != 'none']
-            if audio_formats:
-                audio_formats.sort(key=lambda f: f.get('abr', 0), reverse=True)
-                stream_url = audio_formats[0]['url']
-            else:
-                raise HTTPException(status_code=404, detail="No audio stream found")
-        else:
-            raise HTTPException(status_code=404, detail="No stream URL available")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get stream URL: {str(e)}")
+    stream_url, _ = await _resolve_audio_stream(video_id)
 
     # Convert HLS stream to MP3 via ffmpeg for browser playback
     cmd = [
@@ -1582,6 +1641,7 @@ async def stream_queue_updates(request: Request):
 
     async def event_generator():
         """Generate SSE events for queue updates."""
+        previous_payload: str | None = None
         try:
             while True:
                 # Check if client disconnected
@@ -1591,12 +1651,17 @@ async def stream_queue_updates(request: Request):
                 # Get current jobs
                 jobs = await queue_manager.list_jobs()
                 jobs_data = [job.to_dict() for job in jobs]
+                payload = json.dumps(jobs_data, separators=(",", ":"))
 
-                # Send update via SSE
-                yield f"data: {json.dumps(jobs_data)}\n\n"
+                # Send only state changes. Idle clients need no duplicate payloads.
+                if payload != previous_payload:
+                    yield f"data: {payload}\n\n"
+                    previous_payload = payload
 
-                # Wait before next update
-                await asyncio.sleep(0.5)
+                active = any(
+                    job.status.value in {"queued", "downloading"} for job in jobs
+                )
+                await asyncio.sleep(0.5 if active else 5)
 
         except asyncio.CancelledError:
             pass

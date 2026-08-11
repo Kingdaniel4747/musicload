@@ -3,6 +3,7 @@ services:
     build: .
     image: ghcr.io/kingdaniel4747/musicload:latest
     container_name: musicload
+    init: true
     ports:
       - "8000:8000"
     volumes:
@@ -22,6 +23,8 @@ services:
       # GOTIFY_URL: https://gotify.example.com
       # GOTIFY_TOKEN: your-app-token
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
     # Nginx Proxy Manager users: uncomment this line and the networks block below.
     # networks: [npm_network]

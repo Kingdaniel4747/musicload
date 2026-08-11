@@ -15,6 +15,13 @@
     --error-text: #ad0a2b;
 }
 
+/* Keep login and fallback controls stable on iOS Safari. */
+html { -webkit-text-size-adjust: 100%; }
+button, a, input, select, textarea, label { touch-action: manipulation; }
+@media (max-width: 720px) {
+    input, select, textarea { font-size: 16px; }
+}
+
 * {
     box-sizing: border-box;
     margin: 0;

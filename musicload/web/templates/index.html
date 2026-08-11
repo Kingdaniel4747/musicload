@@ -2,7 +2,7 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <title>Musicload</title>
     <link rel="icon" type="image/png" href="/static/favicon.png" />
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=playback-controls-7" />
+    <link rel="stylesheet" href="/static/ui.css?v=stability-performance-1" />
   </head>
   <body>
     <div class="container">
@@ -1089,12 +1089,21 @@
           return;
         }
 
-        content.innerHTML = '<div class="listenbrainz-empty">Matching your playlist with YouTube Music…</div>';
+        content.innerHTML = `
+          <div class="listenbrainz-progress" role="status" aria-live="polite">
+            <strong>Loading Weekly Exploration</strong>
+            <span id="listenbrainz-progress-label">Fetching up to 50 songs from ListenBrainz…</span>
+            <div class="listenbrainz-progress-track" aria-hidden="true"><span style="width:0%"></span></div>
+          </div>`;
         const source = new EventSource("/api/listenbrainz/recommendations/stream");
         listenbrainzEventSource = source;
         source.addEventListener("progress", (event) => {
           const progress = JSON.parse(event.data);
-          content.innerHTML = `<div class="listenbrainz-empty">Matching ${progress.processed}/${progress.total} · ${progress.matched} found</div>`;
+          const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+          const label = document.getElementById("listenbrainz-progress-label");
+          const bar = content.querySelector(".listenbrainz-progress-track > span");
+          if (label) label.textContent = `${progress.processed} of ${progress.total} songs · ${percent}% · ${progress.matched} matched`;
+          if (bar) bar.style.width = `${percent}%`;
         });
         source.addEventListener("complete", (event) => {
           const data = JSON.parse(event.data);

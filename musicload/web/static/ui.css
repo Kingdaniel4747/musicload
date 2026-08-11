@@ -882,3 +882,38 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
   .mini-player-text-line.is-overflowing .mini-player-text-track > span[aria-hidden="true"] { display: none; }
   .playback-icon-loading circle { animation: none; }
 }
+
+/* iOS stability: prevent focus/double-tap zoom while preserving normal page scrolling. */
+html { -webkit-text-size-adjust: 100%; }
+button, a, input, select, textarea, label { touch-action: manipulation; }
+@media (max-width: 720px) {
+  html, body { touch-action: pan-x pan-y; }
+  input, select, textarea { font-size: 16px !important; }
+}
+
+/* ListenBrainz matching progress. */
+.listenbrainz-progress {
+  display: grid;
+  gap: .55rem;
+  width: min(100%, 32rem);
+  margin: 1.5rem auto;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--card-radius);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+.listenbrainz-progress strong { color: var(--text-primary); }
+.listenbrainz-progress-track {
+  height: .45rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-tertiary);
+}
+.listenbrainz-progress-track > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-primary);
+  transition: width 180ms ease-out;
+}

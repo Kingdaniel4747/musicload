@@ -27,6 +27,7 @@ class AuthenticatedUser:
 _attempts: dict[str, deque[float]] = defaultdict(deque)
 _MAX_ATTEMPTS = 8
 _WINDOW_SECONDS = 60
+_MAX_TRACKED_CLIENTS = 4096
 
 
 class SignedSessionMiddleware:
@@ -116,6 +117,16 @@ class SignedSessionMiddleware:
 def check_login_rate_limit(client: str) -> None:
     """Limit repeated authentication attempts per client address."""
     now = time.monotonic()
+    if len(_attempts) >= _MAX_TRACKED_CLIENTS and client not in _attempts:
+        stale_clients = [
+            key
+            for key, values in _attempts.items()
+            if not values or now - values[-1] > _WINDOW_SECONDS
+        ]
+        for key in stale_clients:
+            _attempts.pop(key, None)
+        if len(_attempts) >= _MAX_TRACKED_CLIENTS:
+            raise AuthenticationError("Too many login attempts. Please wait one minute.")
     attempts = _attempts[client]
     while attempts and now - attempts[0] > _WINDOW_SECONDS:
         attempts.popleft()

@@ -132,11 +132,8 @@ class QueueManager:
         logger.info("Worker started")
         while self._running:
             try:
-                # Get job from queue with timeout
-                try:
-                    job = await asyncio.wait_for(self.queue.get(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    continue
+                # Queue.get blocks without polling, keeping idle CPU usage near zero.
+                job = await self.queue.get()
 
                 # Skip jobs that were removed before the worker picked them up.
                 async with self._jobs_lock:
