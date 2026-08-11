@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=playback-controls-5" />
+    <link rel="stylesheet" href="/static/ui.css?v=playback-controls-7" />
   </head>
   <body>
     <div class="container">
@@ -464,7 +464,9 @@
           const useMobilePreview = window.matchMedia("(pointer: coarse)").matches;
           if (useMobilePreview) {
             currentAudio.src = `/api/preview/${videoId}`;
+            showMiniPlayer(button);
             await currentAudio.play();
+            setPlayingVisual(true);
             return;
           }
 
@@ -1714,8 +1716,8 @@
         document.querySelectorAll(".play-btn").forEach((btn) => {
           btn.addEventListener("click", (e) => {
             e.stopPropagation();
-            const videoId = e.target.dataset.videoId;
-            togglePlay(videoId, e.target);
+            const videoId = e.currentTarget.dataset.videoId;
+            togglePlay(videoId, e.currentTarget);
           });
         });
 
@@ -2573,8 +2575,8 @@
         exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
           btn.addEventListener("click", (e) => {
             e.stopPropagation();
-            const videoId = e.target.dataset.videoId;
-            togglePlay(videoId, e.target);
+            const videoId = e.currentTarget.dataset.videoId;
+            togglePlay(videoId, e.currentTarget);
           });
         });
 
@@ -2824,8 +2826,8 @@
         exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
           btn.addEventListener("click", (e) => {
             e.stopPropagation();
-            const videoId = e.target.dataset.videoId;
-            togglePlay(videoId, e.target);
+            const videoId = e.currentTarget.dataset.videoId;
+            togglePlay(videoId, e.currentTarget);
           });
         });
 
@@ -2921,7 +2923,7 @@
         exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
           btn.addEventListener("click", (e) => {
             e.stopPropagation();
-            togglePlay(e.target.dataset.videoId, e.target);
+            togglePlay(e.currentTarget.dataset.videoId, e.currentTarget);
           });
         });
 

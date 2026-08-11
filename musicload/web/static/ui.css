@@ -659,6 +659,8 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 .mini-player-info {
   width: 100%;
   max-width: 100%;
+  box-sizing: border-box;
+  padding-left: .7rem;
   overflow: hidden;
 }
 .mini-player-text-line {
@@ -695,8 +697,8 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 .play-btn svg,
 .mini-player-toggle svg {
   display: block;
-  width: 1.2rem;
-  height: 1.2rem;
+  width: 1.4rem;
+  height: 1.4rem;
   overflow: visible;
 }
 .playback-icon-play path {
@@ -706,7 +708,7 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
 .playback-icon-pause path {
   fill: none;
   stroke: currentColor;
-  stroke-width: 2.5;
+  stroke-width: 3.1;
   stroke-linecap: round;
 }
 .playback-icon-loading circle {
@@ -719,6 +721,42 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
   animation: playback-spin .8s linear infinite;
 }
 @keyframes playback-spin { to { transform: rotate(360deg); } }
+
+/* Stronger utility glyphs, matching the original visual weight. */
+.mini-player-stop {
+  color: #fff;
+  font-size: 1.65rem;
+  font-weight: 650;
+  line-height: 1;
+}
+.search-input-wrapper::before {
+  content: "";
+  top: 50%;
+  left: 1rem;
+  width: .9rem;
+  height: .9rem;
+  border: 2.3px solid var(--text-tertiary);
+  border-radius: 50%;
+  transform: translateY(-62%);
+}
+.search-input-wrapper::after {
+  content: "";
+  position: absolute;
+  z-index: 1;
+  top: 50%;
+  left: 1.78rem;
+  width: .5rem;
+  height: 2px;
+  background: var(--text-tertiary);
+  transform: rotate(45deg) translateY(2px);
+  transform-origin: left center;
+  pointer-events: none;
+}
+.search-form button[type="submit"]::after {
+  font-size: 1.4rem !important;
+  font-weight: 850;
+  line-height: 1;
+}
 
 /* Every track uses the same stable icon geometry as the mini player. */
 .play-btn[data-playback-state] {
