@@ -654,3 +654,91 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
   align-items: center;
 }
 .queue-section .queue-header-actions { align-self: center; }
+
+/* Stable mini player: overflowing metadata scrolls continuously without changing the box width. */
+.mini-player-info {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+}
+.mini-player-text-line {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.mini-player-text-track {
+  display: inline-flex;
+  width: max-content;
+  min-width: 100%;
+}
+.mini-player-text-track > span { flex: none; }
+.mini-player-text-track > span[aria-hidden="true"] { display: none; }
+.mini-player-text-line.is-overflowing .mini-player-text-track {
+  min-width: 0;
+  animation: mini-player-marquee 14s linear infinite;
+}
+.mini-player-text-line.is-overflowing .mini-player-text-track > span {
+  padding-right: 2.5rem;
+}
+.mini-player-text-line.is-overflowing .mini-player-text-track > span[aria-hidden="true"] { display: inline; }
+@keyframes mini-player-marquee { to { transform: translateX(-50%); } }
+
+/* SVG playback controls stay optically centered in both states. */
+.play-btn,
+.mini-player-toggle {
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  line-height: 0;
+}
+.play-btn svg,
+.mini-player-toggle svg {
+  display: block;
+  width: 1.2rem;
+  height: 1.2rem;
+  overflow: visible;
+}
+.mini-player-toggle svg path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+.mini-player-toggle svg path[fill="currentColor"] { stroke: none; }
+
+@media (max-width: 720px) {
+  .mini-player-toggle,
+  .mini-player-toggle:hover,
+  .mini-player-toggle:active {
+    border-color: transparent;
+    background: transparent;
+    box-shadow: none;
+    color: #fff;
+  }
+  .mini-player {
+    box-sizing: border-box;
+    width: calc(100% - 1.5rem);
+    max-width: none;
+    margin-inline: 0;
+  }
+  #library-results .library-header {
+    align-items: flex-start;
+    margin-top: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+  }
+  #library-results .library-header > div {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  #library-results .explore-track-count { margin-top: .2rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mini-player-text-line.is-overflowing .mini-player-text-track { animation: none; }
+  .mini-player-text-line.is-overflowing .mini-player-text-track > span[aria-hidden="true"] { display: none; }
+}

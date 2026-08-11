@@ -197,10 +197,10 @@
     <div id="mini-player" class="mini-player" hidden>
       <img id="mini-player-cover" class="mini-player-cover" alt="" hidden>
       <div class="mini-player-info">
-        <span id="mini-player-title" class="mini-player-title">Playing</span>
-        <span id="mini-player-artist" class="mini-player-artist"></span>
+        <span id="mini-player-title" class="mini-player-title mini-player-text-line"></span>
+        <span id="mini-player-artist" class="mini-player-artist mini-player-text-line"></span>
       </div>
-      <button id="mini-player-toggle" class="mini-player-toggle" aria-label="Pause playback" title="Pause">⏸</button>
+      <button id="mini-player-toggle" class="mini-player-toggle" aria-label="Pause playback" title="Pause"></button>
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
     </div>
 
@@ -315,6 +315,37 @@
       let currentAudio = null;
       let currentPlayingButton = null;
 
+      const playbackIcons = {
+        play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.5v9l7-4.5z" fill="currentColor"/></svg>',
+        pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 7v10M16 7v10"/></svg>',
+      };
+
+      function setPlaybackIcon(button, isPlaying) {
+        button.innerHTML = isPlaying ? playbackIcons.pause : playbackIcons.play;
+        button.dataset.playbackState = isPlaying ? "pause" : "play";
+        button.setAttribute("aria-label", isPlaying ? "Pause playback" : "Resume playback");
+      }
+
+      function setMiniPlayerText(id, text) {
+        const line = document.getElementById(id);
+        const value = text || "";
+        line.dataset.text = value;
+        line.innerHTML = `<span class="mini-player-text-track"><span>${escapeHtml(value)}</span><span aria-hidden="true">${escapeHtml(value)}</span></span>`;
+        requestAnimationFrame(() => {
+          const firstCopy = line.querySelector(".mini-player-text-track > span");
+          line.classList.toggle("is-overflowing", Boolean(firstCopy && firstCopy.scrollWidth > line.clientWidth));
+        });
+      }
+
+      function refreshMiniPlayerText() {
+        ["mini-player-title", "mini-player-artist"].forEach((id) => {
+          const line = document.getElementById(id);
+          if (line?.dataset.text !== undefined) setMiniPlayerText(id, line.dataset.text);
+        });
+      }
+
+      window.addEventListener("resize", refreshMiniPlayerText);
+
       function showMiniPlayer(button) {
         const track = button.closest(".track");
         const trackCover = track?.querySelector(".track-cover");
@@ -326,21 +357,19 @@
           miniPlayerCover.removeAttribute("src");
           miniPlayerCover.hidden = true;
         }
-        document.getElementById("mini-player-title").textContent =
-          track?.querySelector(".track-title")?.textContent || "Playing";
-        document.getElementById("mini-player-artist").textContent =
-          track?.querySelector(".track-artist")?.textContent || "";
-        document.getElementById("mini-player-toggle").textContent = "⏸";
+        setMiniPlayerText("mini-player-title", track?.querySelector(".track-title")?.textContent || "Playing");
+        setMiniPlayerText("mini-player-artist", track?.querySelector(".track-artist")?.textContent || "");
+        setPlaybackIcon(document.getElementById("mini-player-toggle"), true);
         document.getElementById("mini-player-toggle").title = "Pause";
         document.getElementById("mini-player").hidden = false;
       }
 
       function setPlayingVisual(isPlaying) {
         if (!currentPlayingButton) return;
-        currentPlayingButton.textContent = isPlaying ? "⏸" : "▶";
+        setPlaybackIcon(currentPlayingButton, isPlaying);
         currentPlayingButton.closest(".track")?.classList.toggle("is-playing", isPlaying);
         const toggle = document.getElementById("mini-player-toggle");
-        toggle.textContent = isPlaying ? "⏸" : "▶";
+        setPlaybackIcon(toggle, isPlaying);
         toggle.title = isPlaying ? "Pause" : "Resume";
       }
 
@@ -351,7 +380,7 @@
         }
         if (currentPlayingButton) {
           currentPlayingButton.closest(".track")?.classList.remove("is-playing");
-          currentPlayingButton.textContent = "▶";
+          setPlaybackIcon(currentPlayingButton, false);
           currentPlayingButton.disabled = false;
           currentPlayingButton = null;
         }
