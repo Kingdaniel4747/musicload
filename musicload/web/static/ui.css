@@ -947,13 +947,33 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   justify-content: flex-end;
 }
 @media (max-width: 720px) {
+  /* Top Charts must be the exact same one-row mobile component as search results. */
+  .chart-tracks-list .track {
+    display: grid !important;
+    grid-template-columns: minmax(0, 1fr) auto !important;
+    align-items: center !important;
+    flex-direction: initial !important;
+    flex-wrap: initial !important;
+  }
   #songs-results .track-main,
   .chart-tracks-list .track-main {
+    display: grid !important;
     grid-template-columns: 3.45rem minmax(0, 1fr);
+    align-items: center !important;
+    width: 100% !important;
+    min-width: 0 !important;
     margin: 0;
   }
   #songs-results .track-cover,
   .chart-tracks-list .track-cover { width: 3.45rem; height: 3.45rem; }
   #songs-results .track-actions,
-  .chart-tracks-list .track-actions { width: auto; }
+  .chart-tracks-list .track-actions {
+    display: flex !important;
+    width: auto !important;
+    min-width: 0 !important;
+    flex: 0 0 auto !important;
+    flex-basis: auto !important;
+    flex-direction: row !important;
+    justify-content: flex-end !important;
+  }
 }

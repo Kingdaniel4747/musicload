@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=stability-performance-3" />
+    <link rel="stylesheet" href="/static/ui.css?v=mobile-explore-4" />
   </head>
   <body>
     <div class="container">
@@ -933,8 +933,9 @@
         currentTab = tab;
         if (tab === "downloads") downloadAttention = false;
         updateSearchContext();
+        const activeMobileTab = ["songs", "albums"].includes(tab) ? "explore" : tab;
         document.querySelectorAll(".mobile-nav-btn").forEach((button) => {
-          button.classList.toggle("active", button.dataset.mobileTab === tab);
+          button.classList.toggle("active", button.dataset.mobileTab === activeMobileTab);
         });
         tabButtons.forEach((b) => {
           if (b.dataset.tab === tab) {
@@ -958,7 +959,7 @@
         document.querySelector("#search-form button[type='submit']").disabled = false;
         document.getElementById("search-form").classList.remove("search-disabled");
         document.getElementById("search-form").style.display =
-          ["explore", "library"].includes(tab) ? "" : "none";
+          ["explore", "library", "songs", "albums"].includes(tab) ? "" : "none";
 
         if (tab === "songs") {
           songsResults.classList.add("active");
@@ -2390,7 +2391,7 @@
                         ${pageTracks
                           .map(
                             (track) => `
-                            <div class="track chart-track">
+                            <div class="track">
                                 <div class="track-main">
                                     <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy" onerror="this.style.display='none'">
                                     <div class="track-info">
