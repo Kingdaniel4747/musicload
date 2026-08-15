@@ -58,6 +58,16 @@ class WebSettingsTests(unittest.TestCase):
         ):
             self.assertNotIn(f'id="{removed_id}"', response.text)
 
+    def test_play_buttons_are_bound_once_and_active_listenbrainz_is_not_reloaded(self) -> None:
+        with TestClient(app) as client:
+            response = client.get("/")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertIn('button.dataset.playbackBound = "true"', response.text)
+        self.assertNotIn('exploreResults.querySelectorAll(".play-btn")', response.text)
+        self.assertNotIn('document.querySelectorAll(".play-btn")', response.text)
+        self.assertIn('if (currentTab === "listenbrainz") return;', response.text)
+
     def test_settings_can_be_saved_and_reset(self) -> None:
         with TestClient(app) as client:
             initial = client.get("/api/settings")

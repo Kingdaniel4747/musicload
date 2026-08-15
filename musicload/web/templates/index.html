@@ -446,8 +446,22 @@
       }
 
       function initializePlaybackButtons(root = document) {
-        if (root.matches?.(".play-btn")) setPlaybackButtonState(root, "play");
-        root.querySelectorAll?.(".play-btn").forEach((button) => setPlaybackButtonState(button, "play"));
+        const buttons = [];
+        if (root.matches?.(".play-btn")) buttons.push(root);
+        root.querySelectorAll?.(".play-btn").forEach((button) => buttons.push(button));
+        buttons.forEach((button) => {
+          setPlaybackButtonState(button, "play");
+          if (button.dataset.playbackBound === "true") return;
+          button.dataset.playbackBound = "true";
+          button.addEventListener("click", (event) => {
+            event.stopPropagation();
+            if (button.classList.contains("library-play-btn")) {
+              toggleLocalPlay(button.dataset.entryPath, button);
+              return;
+            }
+            togglePlay(button.dataset.videoId, button);
+          });
+        });
       }
 
       const playbackButtonObserver = new MutationObserver((mutations) => {
@@ -729,6 +743,7 @@
       const listenbrainzButton = document.getElementById("listenbrainz-btn");
       if (listenbrainzButton) {
         listenbrainzButton.addEventListener("click", () => {
+          if (currentTab === "listenbrainz") return;
           exitAlbumViewMode();
           setActiveTab("listenbrainz");
           updateUrlParams("", "listenbrainz");
@@ -1176,9 +1191,6 @@
           </div>
         `;
 
-        content.querySelectorAll(".play-btn").forEach((button) => {
-          button.addEventListener("click", () => togglePlay(button.dataset.videoId, button));
-        });
         content.querySelectorAll(".download-btn").forEach((button) => {
           button.addEventListener("click", handleDownload);
         });
@@ -1849,15 +1861,6 @@
             `,
           )
           .join("");
-
-        // Add play button handlers
-        document.querySelectorAll(".play-btn").forEach((btn) => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const videoId = e.currentTarget.dataset.videoId;
-            togglePlay(videoId, e.currentTarget);
-          });
-        });
 
         // Add download button handlers
         document.querySelectorAll(".download-btn").forEach((btn) => {
@@ -2852,15 +2855,6 @@
           });
         });
 
-        // Play buttons in chart tracks
-        exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const videoId = e.currentTarget.dataset.videoId;
-            togglePlay(videoId, e.currentTarget);
-          });
-        });
-
         // Download buttons in chart tracks
         exploreResults.querySelectorAll(".download-btn").forEach((btn) => {
           btn.addEventListener("click", handleDownload);
@@ -3103,15 +3097,6 @@
             );
           });
 
-        // Play buttons in playlist tracks
-        exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            const videoId = e.currentTarget.dataset.videoId;
-            togglePlay(videoId, e.currentTarget);
-          });
-        });
-
         // Individual download buttons
         exploreResults.querySelectorAll(".download-btn").forEach((btn) => {
           btn.addEventListener("click", handleDownload);
@@ -3198,14 +3183,6 @@
         // Download all
         document.getElementById("download-all-album-explore").addEventListener("click", () => {
           queueMultipleTracks(tracks, document.getElementById("download-all-album-explore"));
-        });
-
-        // Play buttons
-        exploreResults.querySelectorAll(".play-btn").forEach((btn) => {
-          btn.addEventListener("click", (e) => {
-            e.stopPropagation();
-            togglePlay(e.currentTarget.dataset.videoId, e.currentTarget);
-          });
         });
 
         // Download buttons
@@ -3380,10 +3357,6 @@
           updateExploreUrlParams("home");
         });
 
-        libraryResults.querySelectorAll(".library-play-btn").forEach((btn) => {
-          btn.addEventListener("click", () => toggleLocalPlay(btn.dataset.entryPath, btn));
-        });
-
         libraryResults.querySelectorAll(".library-delete-btn").forEach((btn) => {
           btn.addEventListener("click", handleLibraryDelete);
         });
@@ -3478,9 +3451,6 @@
           loadLibraryContent(true, searchInput.value.trim());
         });
         document.getElementById("duplicates-rescan-btn").addEventListener("click", loadLibraryDuplicates);
-        libraryResults.querySelectorAll(".library-play-btn").forEach((button) => {
-          button.addEventListener("click", () => toggleLocalPlay(button.dataset.entryPath, button));
-        });
         libraryResults.querySelectorAll(".library-delete-btn").forEach((button) => {
           button.addEventListener("click", handleLibraryDelete);
         });
