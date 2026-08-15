@@ -1386,8 +1386,8 @@ async def download_file(file_path: str):
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
 
-def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool]:
-    """Resolve one direct audio URL off the event loop."""
+def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]]:
+    """Resolve one direct audio URL and the request headers it requires."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
     youtube_url = f"https://music.youtube.com/watch?v={video_id}"
@@ -1399,6 +1399,7 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool]:
         cookie_file=config.cookie_file_path,
         config=config,
     )
+    selected_format = info
     if "url" in info:
         stream_url = info["url"]
     else:
@@ -1409,12 +1410,21 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool]:
         ]
         if not audio_formats:
             raise ValueError("No audio stream found")
-        stream_url = max(audio_formats, key=lambda item: item.get("abr") or 0)["url"]
-    is_hls = info.get("protocol") == "m3u8_native" or ".m3u8" in stream_url
-    return stream_url, is_hls
+        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
+        stream_url = selected_format["url"]
+    protocol = selected_format.get("protocol") or info.get("protocol")
+    is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
+    raw_headers = selected_format.get("http_headers") or info.get("http_headers") or {}
+    http_headers = {
+        str(name): str(value)
+        for name, value in raw_headers.items()
+        if value is not None and "\r" not in str(name) and "\n" not in str(name)
+        and "\r" not in str(value) and "\n" not in str(value)
+    }
+    return stream_url, is_hls, http_headers
 
 
-async def _resolve_audio_stream(video_id: str) -> tuple[str, bool]:
+async def _resolve_audio_stream(video_id: str) -> tuple[str, bool, dict[str, str]]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
     cached = _stream_url_cache.get(video_id)
@@ -1431,7 +1441,7 @@ async def _resolve_audio_stream(video_id: str) -> tuple[str, bool]:
 @app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
 async def get_stream_url(video_id: str):
     """Get a cached direct stream URL without blocking the event loop."""
-    stream_url, is_hls = await _resolve_audio_stream(video_id)
+    stream_url, is_hls, _ = await _resolve_audio_stream(video_id)
     return StreamUrlResponse(
         video_id=video_id,
         url=stream_url,
@@ -1442,23 +1452,14 @@ async def get_stream_url(video_id: str):
 
 @app.get("/api/preview/{video_id}")
 async def preview_audio(video_id: str):
-    """Stream audio through the server to avoid CORS issues with HLS streams.
+    """Stream audio through Musicload instead of exposing the source URL.
 
-    Uses yt-dlp to resolve the stream URL, then ffmpeg to remux HLS into
-    a fragmented MP4 that the browser can play progressively.
+    Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
+    converts it to MP3 that browsers can play progressively.
     """
-    stream_url, _ = await _resolve_audio_stream(video_id)
+    stream_url, _, http_headers = await _resolve_audio_stream(video_id)
 
-    # Convert HLS stream to MP3 via ffmpeg for browser playback
-    cmd = [
-        'ffmpeg',
-        '-i', stream_url,
-        '-vn',
-        '-f', 'mp3',
-        '-ab', '128k',
-        '-loglevel', 'error',
-        'pipe:1',
-    ]
+    cmd = _preview_ffmpeg_command(stream_url, http_headers)
 
     process = await asyncio.create_subprocess_exec(
         *cmd,
@@ -1478,6 +1479,25 @@ async def preview_audio(video_id: str):
                 process.kill()
 
     return StreamingResponse(stream_audio(), media_type="audio/mpeg")
+
+
+def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> list[str]:
+    """Build the ffmpeg preview command, preserving yt-dlp request headers."""
+    cmd = ['ffmpeg', '-nostdin']
+    if http_headers:
+        ffmpeg_headers = "".join(
+            f"{name}: {value}\r\n" for name, value in http_headers.items()
+        )
+        cmd.extend(['-headers', ffmpeg_headers])
+    cmd.extend([
+        '-i', stream_url,
+        '-vn',
+        '-f', 'mp3',
+        '-ab', '128k',
+        '-loglevel', 'error',
+        'pipe:1',
+    ])
+    return cmd
 
 
 # Queue endpoints

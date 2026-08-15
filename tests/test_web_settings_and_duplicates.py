@@ -18,7 +18,7 @@ os.environ["MUSICLOAD_DOWNLOAD_DIR"] = str(_ROOT / "music")
 from fastapi.testclient import TestClient
 
 from musicload.config import get_config
-from musicload.web.app import _find_library_duplicates_sync, app
+from musicload.web.app import _find_library_duplicates_sync, _preview_ffmpeg_command, app
 
 
 class WebSettingsTests(unittest.TestCase):
@@ -67,6 +67,8 @@ class WebSettingsTests(unittest.TestCase):
         self.assertNotIn('exploreResults.querySelectorAll(".play-btn")', response.text)
         self.assertNotIn('document.querySelectorAll(".play-btn")', response.text)
         self.assertIn('if (currentTab === "listenbrainz") return;', response.text)
+        self.assertIn('audio.src = `/api/preview/${videoId}`;', response.text)
+        self.assertNotIn('fetch(`/api/stream-url/${videoId}`)', response.text)
 
     def test_settings_can_be_saved_and_reset(self) -> None:
         with TestClient(app) as client:
@@ -206,6 +208,22 @@ class DuplicateFinderTests(unittest.TestCase):
 
         self.assertEqual(result["groups"], [])
 
+
+class PreviewPlaybackTests(unittest.TestCase):
+    def test_ffmpeg_receives_stream_request_headers(self) -> None:
+        command = _preview_ffmpeg_command(
+            "https://example.test/audio",
+            {"User-Agent": "Musicload Test", "Referer": "https://music.youtube.com/"},
+        )
+
+        self.assertEqual(command[:2], ["ffmpeg", "-nostdin"])
+        headers_index = command.index("-headers")
+        self.assertIn("User-Agent: Musicload Test\r\n", command[headers_index + 1])
+        self.assertIn(
+            "Referer: https://music.youtube.com/\r\n",
+            command[headers_index + 1],
+        )
+        self.assertIn("https://example.test/audio", command)
 
 if __name__ == "__main__":
     unittest.main()

@@ -591,25 +591,10 @@
             stopCurrentAudio();
           });
 
-          // Mobile browsers require play() to follow the tap directly. Use the
-          // same-origin preview without waiting for stream URL discovery.
-          const useMobilePreview = window.matchMedia("(pointer: coarse)").matches;
-          if (useMobilePreview) {
-            audio.src = `/api/preview/${videoId}`;
-            showMiniPlayer(button);
-            await audio.play();
-            if (currentAudio !== audio) return;
-            button.disabled = false;
-            setPlayingVisual(true);
-            showMiniPlayer(button);
-            return;
-          }
-
-          const response = await fetch(`/api/stream-url/${videoId}`);
-          if (!response.ok) throw new Error("Failed to get stream URL");
-          const data = await response.json();
-          if (currentAudio !== audio) return;
-          audio.src = data.is_hls ? `/api/preview/${videoId}` : data.url;
+          // Keep the expiring Google stream URL on the server. Direct browser
+          // requests can lose yt-dlp's required headers and fail with HTTP 403.
+          audio.src = `/api/preview/${videoId}`;
+          showMiniPlayer(button);
           await audio.play();
           if (currentAudio !== audio) return;
           button.disabled = false;
