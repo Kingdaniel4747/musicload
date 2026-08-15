@@ -252,24 +252,16 @@ class ListenBrainzSettingsRequest(BaseModel):
 class AppSettingsRequest(BaseModel):
     """Web-managed application settings."""
 
-    download_dir: str = Field(min_length=1, max_length=4096)
     audio_format: str = "opus"
     filename_template: str = Field(min_length=1, max_length=512)
     organization_mode: str = "album"
     use_primary_artist: bool = False
-    web_port: int = Field(default=8000, ge=1, le=65535)
     web_playlist_name: str | None = Field(default=None, max_length=128)
     gotify_url: str | None = Field(default=None, max_length=2048)
     gotify_token: str | None = Field(default=None, max_length=1024)
     clear_gotify_token: bool = False
     cookie_mode: str = "auto"
-    cookie_retry_delay: float = Field(default=1.0, ge=0, le=60)
-    log_cookie_usage: bool = True
-    cors_origins: str = Field(default="*", min_length=1, max_length=4096)
-    unavailable_cooldown_hours: int = Field(default=168, ge=0, le=87600)
-    lyrics_cache_hours: int = Field(default=168, ge=0, le=87600)
     multi_user: bool = False
-    replaygain: bool = False
     allow_ugc: bool = False
     navidrome_url: str | None = Field(default=None, max_length=2048)
     session_secret: str | None = Field(default=None, max_length=1024)
@@ -1934,30 +1926,19 @@ def _clean_optional_setting(value: str | None) -> str | None:
 
 def _settings_response() -> dict:
     """Return effective values while redacting stored secrets."""
-    from musicload.replaygain import is_rsgain_available
     from musicload.settings import RESTART_REQUIRED_SETTINGS, load_settings
 
     effective = get_config()
     overrides = load_settings(effective.data_dir)
-    cors_value = "*" if effective.cors_origins == ["*"] else ", ".join(effective.cors_origins)
     values = {
-        "download_dir": str(effective.download_dir),
-        "data_dir": str(effective.data_dir),
         "audio_format": effective.audio_format,
         "filename_template": effective.filename_template,
         "organization_mode": effective.organization_mode,
         "use_primary_artist": effective.use_primary_artist,
-        "web_port": effective.web_port,
         "web_playlist_name": effective.web_playlist_name or "",
         "gotify_url": effective.gotify_url or "",
         "cookie_mode": effective.cookie_mode,
-        "cookie_retry_delay": effective.cookie_retry_delay,
-        "log_cookie_usage": effective.log_cookie_usage,
-        "cors_origins": cors_value,
-        "unavailable_cooldown_hours": effective.unavailable_cooldown_hours,
-        "lyrics_cache_hours": effective.lyrics_cache_hours,
         "multi_user": effective.multi_user,
-        "replaygain": effective.replaygain,
         "allow_ugc": effective.allow_ugc,
         "navidrome_url": effective.navidrome_url or "",
         "session_https_only": effective.session_https_only,
@@ -1971,7 +1952,6 @@ def _settings_response() -> dict:
         },
         "overridden": sorted(overrides),
         "restart_required_fields": sorted(RESTART_REQUIRED_SETTINGS),
-        "capabilities": {"rsgain_available": is_rsgain_available()},
     }
 
 
@@ -2013,23 +1993,7 @@ async def api_save_settings(payload: AppSettingsRequest, request: Request):
     ):
         raise HTTPException(status_code=400, detail="Playlist name must not contain a path")
 
-    cors_origins = payload.cors_origins.strip()
-    if cors_origins != "*":
-        origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
-        if not origins or any(
-            urlparse(origin).scheme not in {"http", "https"} or not urlparse(origin).netloc
-            for origin in origins
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="CORS origins must be '*' or comma-separated HTTP(S) origins",
-            )
-        cors_origins = ",".join(origins)
-
-    download_dir = payload.download_dir.strip()
     filename_template = payload.filename_template.strip()
-    if not download_dir:
-        raise HTTPException(status_code=400, detail="Download directory is required")
     if not filename_template:
         raise HTTPException(status_code=400, detail="Filename template is required")
 
@@ -2052,22 +2016,14 @@ async def api_save_settings(payload: AppSettingsRequest, request: Request):
         )
 
     values = {
-        "download_dir": download_dir,
         "audio_format": payload.audio_format,
         "filename_template": filename_template,
         "organization_mode": payload.organization_mode,
         "use_primary_artist": payload.use_primary_artist,
-        "web_port": payload.web_port,
         "web_playlist_name": playlist_name,
         "gotify_url": gotify_url,
         "cookie_mode": payload.cookie_mode,
-        "cookie_retry_delay": payload.cookie_retry_delay,
-        "log_cookie_usage": payload.log_cookie_usage,
-        "cors_origins": cors_origins,
-        "unavailable_cooldown_hours": payload.unavailable_cooldown_hours,
-        "lyrics_cache_hours": payload.lyrics_cache_hours,
         "multi_user": payload.multi_user,
-        "replaygain": payload.replaygain,
         "allow_ugc": payload.allow_ugc,
         "navidrome_url": navidrome_url,
         "session_https_only": payload.session_https_only,
@@ -2093,7 +2049,7 @@ async def api_save_settings(payload: AppSettingsRequest, request: Request):
     logger.info("Application settings updated by %s", _current_account_name(request))
     return {
         "success": True,
-        "message": "Settings saved. Restart Musicload to apply every change.",
+        "message": "Settings saved. Restart Musicload after changing an option marked restart.",
         **_settings_response(),
     }
 

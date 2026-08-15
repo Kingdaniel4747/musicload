@@ -14,18 +14,38 @@ from typing import Any
 
 SETTINGS_FILENAME = "settings.json"
 
+# Only these options are owned by the web settings form. Older settings files
+# may still contain retired technical fields; ignoring them makes Docker/env
+# values take effect immediately without requiring a manual reset first.
+WEB_MANAGED_SETTINGS = frozenset(
+    {
+        "allow_ugc",
+        "audio_format",
+        "cookie_mode",
+        "filename_template",
+        "gotify_token",
+        "gotify_url",
+        "listenbrainz_web",
+        "multi_user",
+        "navidrome_url",
+        "organization_mode",
+        "session_https_only",
+        "session_secret",
+        "use_primary_artist",
+        "web_playlist_name",
+    }
+)
+
 # These fields are never returned verbatim by the settings API.
 SENSITIVE_SETTINGS = frozenset({"gotify_token", "session_secret"})
 
 # These values are consumed while the web server or middleware is created.
 RESTART_REQUIRED_SETTINGS = frozenset(
     {
-        "cors_origins",
         "listenbrainz_web",
         "navidrome_url",
         "session_https_only",
         "session_secret",
-        "web_port",
     }
 )
 
@@ -44,7 +64,9 @@ def load_settings(data_dir: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
-    return payload if isinstance(payload, dict) else {}
+    if not isinstance(payload, dict):
+        return {}
+    return {key: value for key, value in payload.items() if key in WEB_MANAGED_SETTINGS}
 
 
 def save_settings(data_dir: Path, values: dict[str, Any]) -> Path:

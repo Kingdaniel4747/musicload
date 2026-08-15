@@ -257,15 +257,10 @@
                   </select>
                 </label>
                 <label class="settings-wide">
-                  <span>Download directory</span>
-                  <input id="setting-download-dir" type="text" autocomplete="off">
-                </label>
-                <label class="settings-wide">
                   <span>Flat filename template</span>
                   <input id="setting-filename-template" type="text" autocomplete="off">
                 </label>
                 <label class="settings-toggle"><input id="setting-primary-artist" type="checkbox"><span>Use primary artist for folders</span></label>
-                <label class="settings-toggle"><input id="setting-replaygain" type="checkbox"><span>Apply ReplayGain/R128 <small id="replaygain-support"></small></span></label>
               </div>
             </section>
 
@@ -273,15 +268,6 @@
               <h3>Search, metadata &amp; reliability</h3>
               <div class="settings-grid">
                 <label class="settings-toggle"><input id="setting-allow-ugc" type="checkbox"><span>Include user-generated uploads</span></label>
-                <label class="settings-toggle"><input id="setting-log-cookie-usage" type="checkbox"><span>Log cookie usage</span></label>
-                <label>
-                  <span>Unavailable retry cooldown (hours)</span>
-                  <input id="setting-unavailable-cooldown" type="number" min="0" max="87600">
-                </label>
-                <label>
-                  <span>Negative lyrics cache (hours)</span>
-                  <input id="setting-lyrics-cache" type="number" min="0" max="87600">
-                </label>
                 <label>
                   <span>Cookie retry mode</span>
                   <select id="setting-cookie-mode">
@@ -289,10 +275,6 @@
                     <option value="always">Always use cookies</option>
                     <option value="never">Never use cookies</option>
                   </select>
-                </label>
-                <label>
-                  <span>Cookie retry delay (seconds)</span>
-                  <input id="setting-cookie-retry-delay" type="number" min="0" max="60" step="0.1">
                 </label>
               </div>
             </section>
@@ -341,25 +323,6 @@
                   <input id="setting-gotify-token" type="password" autocomplete="new-password" placeholder="Leave blank to keep the configured token">
                 </label>
                 <label class="settings-toggle"><input id="clear-gotify-token" type="checkbox"><span>Remove configured Gotify token</span></label>
-              </div>
-            </section>
-
-            <section class="settings-section">
-              <h3>Network &amp; advanced</h3>
-              <p class="settings-description">Port, CORS and authentication-related changes become active after a container restart. The host-side port and volume mounts remain Docker settings.</p>
-              <div class="settings-grid">
-                <label>
-                  <span>Internal web port</span>
-                  <input id="setting-web-port" type="number" min="1" max="65535">
-                </label>
-                <label class="settings-wide">
-                  <span>CORS origins</span>
-                  <input id="setting-cors-origins" type="text" placeholder="* or https://example.com">
-                </label>
-                <label class="settings-wide">
-                  <span>Persistent data directory (Docker bootstrap setting)</span>
-                  <input id="setting-data-dir" type="text" readonly>
-                </label>
               </div>
             </section>
 
@@ -2327,23 +2290,14 @@
       const findDuplicatesSettingsBtn = document.getElementById("find-duplicates-settings-btn");
 
       const settingsFields = {
-        download_dir: "setting-download-dir",
-        data_dir: "setting-data-dir",
         audio_format: "setting-audio-format",
         filename_template: "setting-filename-template",
         organization_mode: "setting-organization-mode",
         use_primary_artist: "setting-primary-artist",
-        web_port: "setting-web-port",
         web_playlist_name: "setting-web-playlist",
         gotify_url: "setting-gotify-url",
         cookie_mode: "setting-cookie-mode",
-        cookie_retry_delay: "setting-cookie-retry-delay",
-        log_cookie_usage: "setting-log-cookie-usage",
-        cors_origins: "setting-cors-origins",
-        unavailable_cooldown_hours: "setting-unavailable-cooldown",
-        lyrics_cache_hours: "setting-lyrics-cache",
         multi_user: "setting-multi-user",
-        replaygain: "setting-replaygain",
         allow_ugc: "setting-allow-ugc",
         navidrome_url: "setting-navidrome-url",
         session_https_only: "setting-session-https-only",
@@ -2370,11 +2324,6 @@
           : "Optional application token";
         document.getElementById("clear-session-secret").checked = false;
         document.getElementById("clear-gotify-token").checked = false;
-        const replaygainSupport = document.getElementById("replaygain-support");
-        replaygainSupport.textContent = data.capabilities.rsgain_available
-          ? "available"
-          : "rsgain not installed";
-        replaygainSupport.classList.toggle("settings-warning", !data.capabilities.rsgain_available);
       }
 
       async function loadSettings() {
@@ -2437,24 +2386,16 @@
         const value = (id) => document.getElementById(id).value.trim();
         const checked = (id) => document.getElementById(id).checked;
         const payload = {
-          download_dir: value("setting-download-dir"),
           audio_format: value("setting-audio-format"),
           filename_template: value("setting-filename-template"),
           organization_mode: value("setting-organization-mode"),
           use_primary_artist: checked("setting-primary-artist"),
-          web_port: Number(value("setting-web-port")),
           web_playlist_name: value("setting-web-playlist") || null,
           gotify_url: value("setting-gotify-url") || null,
           gotify_token: value("setting-gotify-token") || null,
           clear_gotify_token: checked("clear-gotify-token"),
           cookie_mode: value("setting-cookie-mode"),
-          cookie_retry_delay: Number(value("setting-cookie-retry-delay")),
-          log_cookie_usage: checked("setting-log-cookie-usage"),
-          cors_origins: value("setting-cors-origins"),
-          unavailable_cooldown_hours: Number(value("setting-unavailable-cooldown")),
-          lyrics_cache_hours: Number(value("setting-lyrics-cache")),
           multi_user: checked("setting-multi-user"),
-          replaygain: checked("setting-replaygain"),
           allow_ugc: checked("setting-allow-ugc"),
           navidrome_url: value("setting-navidrome-url") || null,
           session_secret: value("setting-session-secret") || null,
@@ -3466,19 +3407,25 @@
         }
       }
 
+      function duplicateSummaryText(data) {
+        const groups = `${data.total_groups} ${data.total_groups === 1 ? "group" : "groups"}`;
+        const files = `${data.duplicate_files} ${data.duplicate_files === 1 ? "file" : "files"}`;
+        return `${groups} · ${files} · ${data.scanned_files} scanned`;
+      }
+
       function renderLibraryDuplicates(data) {
         let html = `
           <div class="explore-playlist-header library-header duplicate-library-header">
             <div>
               <h2>Library duplicates</h2>
-              <span class="explore-track-count">${data.total_groups} groups · ${data.duplicate_files} files · ${data.scanned_files} scanned</span>
+              <span class="explore-track-count">${duplicateSummaryText(data)}</span>
             </div>
             <div class="explore-section-actions">
               <button id="duplicates-back-btn" class="pagination-btn">All files</button>
               <button id="duplicates-rescan-btn" class="pagination-btn">Scan again</button>
             </div>
           </div>
-          <p class="duplicate-explanation">Possible matches have the same meaningful words in their song names. Common additions such as “official audio”, “lyrics”, “copy”, and remaster years are ignored. Review the cover, song details and audio before deciding. Musicload never selects or deletes a file automatically.</p>
+          <p class="duplicate-explanation">Possible matches have the same meaningful words in their song names. Common additions such as “official audio”, “lyrics”, “copy”, and remaster years are ignored. Review the cover, song details and audio before deciding. Musicload never selects or deletes a file automatically. The current result stays in place until you select Scan again.</p>
         `;
 
         if (!data.groups.length) {
@@ -3494,7 +3441,7 @@
               <div class="duplicate-group-header">
                 <div>
                   <span class="duplicate-kind">Possible name match</span>
-                  <strong>${group.tracks.length} matching files</strong>
+                  <strong class="duplicate-group-count">${group.tracks.length} matching files</strong>
                 </div>
                 <span class="duplicate-group-number">Group ${index + 1}</span>
               </div>
@@ -3572,6 +3519,52 @@
         }
       }
 
+      function removeDuplicateTrackFromCurrentScan(entryPath, trackElement) {
+        if (!libraryDuplicateData || !trackElement) return;
+
+        const groupElement = trackElement.closest(".duplicate-group");
+        const group = libraryDuplicateData.groups.find((candidate) =>
+          candidate.tracks.some((track) => track.entry_path === entryPath),
+        );
+        if (group) {
+          group.tracks = group.tracks.filter((track) => track.entry_path !== entryPath);
+        }
+        libraryDuplicateData.duplicate_files = libraryDuplicateData.groups.reduce(
+          (total, candidate) => total + candidate.tracks.length,
+          0,
+        );
+
+        const summary = libraryResults.querySelector(".explore-track-count");
+        if (summary) {
+          summary.textContent = duplicateSummaryText(libraryDuplicateData);
+        }
+
+        trackElement.classList.add("is-removing");
+        setTimeout(() => {
+          trackElement.remove();
+          const remaining = group?.tracks.length ?? groupElement?.querySelectorAll(".duplicate-track").length ?? 0;
+          if (group && remaining === 0) {
+            libraryDuplicateData.groups = libraryDuplicateData.groups.filter((candidate) => candidate !== group);
+            libraryDuplicateData.total_groups = libraryDuplicateData.groups.length;
+            groupElement?.remove();
+            const updatedSummary = libraryResults.querySelector(".explore-track-count");
+            if (updatedSummary) {
+              updatedSummary.textContent = duplicateSummaryText(libraryDuplicateData);
+            }
+            const remainingGroups = libraryResults.querySelectorAll(".duplicate-group");
+            remainingGroups.forEach((element, index) => {
+              const number = element.querySelector(".duplicate-group-number");
+              if (number) number.textContent = `Group ${index + 1}`;
+            });
+            return;
+          }
+          const groupCount = groupElement?.querySelector(".duplicate-group-count");
+          if (groupCount) {
+            groupCount.textContent = remaining === 1 ? "1 file remains from this scan" : `${remaining} matching files`;
+          }
+        }, 220);
+      }
+
       async function handleLibraryDelete(e) {
         const btn = e.currentTarget;
         const entryPath = btn.dataset.entryPath;
@@ -3595,8 +3588,8 @@
               throw new Error(err?.detail || "Failed to delete file");
             }
             if (libraryDuplicateMode) {
+              removeDuplicateTrackFromCurrentScan(entryPath, trackElement);
               showStatus(`Deleted: ${title}`);
-              await loadLibraryDuplicates();
               return;
             }
             libraryTracks = libraryTracks.filter((t) => t.entry_path !== entryPath);

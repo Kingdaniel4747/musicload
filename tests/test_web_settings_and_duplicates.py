@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 import unittest
@@ -16,6 +17,7 @@ os.environ["MUSICLOAD_DOWNLOAD_DIR"] = str(_ROOT / "music")
 
 from fastapi.testclient import TestClient
 
+from musicload.config import get_config
 from musicload.web.app import _find_library_duplicates_sync, app
 
 
@@ -24,7 +26,7 @@ class WebSettingsTests(unittest.TestCase):
     def _payload_from(client: TestClient) -> dict:
         response = client.get("/api/settings")
         values = response.json()["values"]
-        payload = {key: value for key, value in values.items() if key != "data_dir"}
+        payload = dict(values)
         payload.update(
             {
                 "gotify_token": None,
@@ -43,6 +45,18 @@ class WebSettingsTests(unittest.TestCase):
         self.assertIn('id="settings-modal"', response.text)
         self.assertIn('id="find-duplicates-settings-btn"', response.text)
         self.assertNotIn('id="library-duplicates-btn"', response.text)
+        for removed_id in (
+            "setting-download-dir",
+            "setting-replaygain",
+            "setting-log-cookie-usage",
+            "setting-unavailable-cooldown",
+            "setting-lyrics-cache",
+            "setting-cookie-retry-delay",
+            "setting-web-port",
+            "setting-cors-origins",
+            "setting-data-dir",
+        ):
+            self.assertNotIn(f'id="{removed_id}"', response.text)
 
     def test_settings_can_be_saved_and_reset(self) -> None:
         with TestClient(app) as client:
@@ -53,13 +67,23 @@ class WebSettingsTests(unittest.TestCase):
                 {
                     "audio_format": "mp3",
                     "organization_mode": "album",
-                    "web_port": 8123,
                 }
             )
             saved = client.put("/api/settings", json=payload)
             self.assertEqual(saved.status_code, 200, saved.text)
             self.assertEqual(saved.json()["values"]["audio_format"], "mp3")
-            self.assertEqual(saved.json()["values"]["web_port"], 8123)
+            for removed_key in (
+                "download_dir",
+                "replaygain",
+                "log_cookie_usage",
+                "unavailable_cooldown_hours",
+                "lyrics_cache_hours",
+                "cookie_retry_delay",
+                "web_port",
+                "cors_origins",
+                "data_dir",
+            ):
+                self.assertNotIn(removed_key, saved.json()["values"])
             self.assertNotIn("session_secret", saved.json()["values"])
             self.assertNotIn("gotify_token", saved.json()["values"])
             self.assertTrue((_ROOT / "data" / "settings.json").is_file())
@@ -75,6 +99,29 @@ class WebSettingsTests(unittest.TestCase):
             response = client.put("/api/settings", json=payload)
         self.assertEqual(response.status_code, 400)
         self.assertIn("at least 32 characters", response.json()["detail"])
+
+    def test_retired_web_overrides_are_ignored(self) -> None:
+        settings_file = _ROOT / "data" / "settings.json"
+        settings_file.parent.mkdir(parents=True, exist_ok=True)
+        settings_file.write_text(
+            json.dumps(
+                {
+                    "audio_format": "mp3",
+                    "download_dir": "ignored-downloads",
+                    "replaygain": True,
+                    "web_port": 8123,
+                }
+            ),
+            encoding="utf-8",
+        )
+        try:
+            config = get_config()
+            self.assertEqual(config.audio_format, "mp3")
+            self.assertEqual(config.download_dir, _ROOT / "music")
+            self.assertFalse(config.replaygain)
+            self.assertEqual(config.web_port, 8000)
+        finally:
+            settings_file.unlink(missing_ok=True)
 
 
 class DuplicateFinderTests(unittest.TestCase):

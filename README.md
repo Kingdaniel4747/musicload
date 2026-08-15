@@ -43,7 +43,7 @@ docker compose up -d
 
 Open `http://SERVER_IP:8000` and select the **Settings** button. Application options are stored in `/data/settings.json` and survive container updates.
 
-The host port and volume mounts remain Docker-level settings because Docker needs them before Musicload starts. All Musicload behavior is configured in the web interface. Existing environment variables remain supported as fallbacks; saved web settings take precedence.
+The host port and volume mounts remain Docker-level settings because Docker needs them before Musicload starts. Everyday Musicload options are configured in the web interface. Technical environment variables remain supported for non-Docker and advanced deployments; saved web settings take precedence only for the options shown there.
 
 ## Use the same library as Navidrome
 
@@ -74,27 +74,22 @@ Navidrome adds new files during its next regular library scan.
 The administrator can configure the following from the Settings dialog:
 
 - Default audio format and file organization
-- Download directory and flat filename template
+- Flat-mode filename template
 - Primary-artist folder naming
-- ReplayGain/R128 processing when `rsgain` is available
 - Official-audio/UGC filtering
-- Retry cooldowns and lyrics-cache lifetime
 - Cookie behavior and uploaded `cookies.txt`
 - M3U playlist creation and Remote-User prefixes
 - ListenBrainz web integration
 - Navidrome login, signed-session secret, and HTTPS-only cookies
 - Gotify download notifications
-- Internal web port and CORS origins
 
-Settings used while the server or authentication middleware starts are marked as restart-sensitive. Restart the container after changing the web port, CORS, ListenBrainz, or Navidrome login settings:
+Settings used while the server or authentication middleware starts are marked as restart-sensitive. Restart the container after changing ListenBrainz or Navidrome login settings:
 
 ```bash
 docker compose restart musicload
 ```
 
-If the internal web port changes, update the container side of the Compose port mapping as well. For example, port `8001` requires `8001:8001`.
-
-`MUSICLOAD_DATA_DIR` remains a bootstrap setting because it tells Musicload where `settings.json` itself is stored. The provided Docker image sets it to `/data`.
+The Docker image fixes the internal download, data, and web paths to `/downloads`, `/data`, and port `8000`. Change their host-side volume paths or published port in `docker-compose.yml`, not in the web interface.
 
 ## Duplicate finder
 
@@ -102,7 +97,7 @@ Open **Settings → Library maintenance** and select **Find duplicates**. Musicl
 
 The finder compares the meaningful words in song names. Capitalization, punctuation, accents, and common additions such as `official audio`, `lyrics`, `copy`, or a remaster year do not prevent a match. It does not compare file contents and does not automatically decide which copy should be kept.
 
-Possible matches may still be different releases, masters, or formats. Review the cover, title, artist, album, path, format, size, and duration, and play each file before deciding. Every deletion is manual and requires confirmation; Musicload never selects or deletes a file on your behalf.
+Possible matches may still be different releases, masters, or formats. Review the cover, title, artist, album, path, format, size, and duration, and play each file before deciding. Every deletion is manual and requires confirmation; Musicload never selects or deletes a file on your behalf. A deleted row disappears from the current result without starting another scan, so the list and scroll position stay in place until you select **Scan again**.
 
 ## Install as an app
 
@@ -176,7 +171,7 @@ musicload tag --dry-run /path/to/music
 musicload tag /path/to/music
 ```
 
-ReplayGain requires the external `rsgain` executable. Musicload reports its availability in Settings and skips ReplayGain safely when it is not installed.
+ReplayGain for the optional command-line tagging workflow requires the external `rsgain` executable and is skipped safely when it is not installed.
 
 ## Data and privacy
 
