@@ -1,6 +1,5 @@
 services:
   musicload:
-    build: .
     image: ghcr.io/kingdaniel4747/musicload:latest
     container_name: musicload
     init: true
