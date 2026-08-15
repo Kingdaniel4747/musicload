@@ -199,7 +199,7 @@ def download_cmd(
         typer.Option(
             "--organization-mode",
             envvar="MUSICLOAD_ORGANIZATION_MODE",
-            help="File organization: flat (all in one dir) or album (Artist/Year - Album/Track). Default: flat",
+            help="File organization: flat (all in one dir) or album (Artist/Year - Album/Track). Default: album",
         ),
     ] = None,
     use_primary_artist: Annotated[
@@ -774,7 +774,7 @@ def web(
         typer.Option(
             "--organization-mode",
             envvar="MUSICLOAD_ORGANIZATION_MODE",
-            help="File organization: flat (all in one dir) or album (Artist/Year - Album/Track). Default: flat",
+            help="File organization: flat (all in one dir) or album (Artist/Year - Album/Track). Default: album",
         ),
     ] = None,
     use_primary_artist: Annotated[

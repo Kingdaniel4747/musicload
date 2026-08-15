@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=mobile-explore-4" />
+    <link rel="stylesheet" href="/static/ui.css?v=settings-duplicates-2" />
   </head>
   <body>
     <div class="container">
@@ -69,13 +69,16 @@
             </button>
             <div class="utility-controls">
             <button
-              id="cookies-btn"
+              id="settings-btn"
               class="icon-btn"
-              aria-label="Cookies"
-              title="Cookies"
+              aria-label="Settings"
+              title="Settings"
               {% if not is_admin %}hidden{% endif %}
             >
-              🍪
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3"></circle>
+                <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>
+              </svg>
             </button>
             {% if can_view_logs %}
             <button id="logs-btn" class="icon-btn" type="button" aria-label="Logs" title="Application logs">
@@ -157,7 +160,7 @@
         <div class="listenbrainz-header">
           <div>
             <h2>ListenBrainz</h2>
-            <p>Explore your personal Weekly Exploration playlist. Nothing downloads automatically.</p>
+            <p>Explore your personal Weekly Exploration playlist and optionally schedule automatic downloads.</p>
           </div>
           <form id="listenbrainz-settings-form" class="listenbrainz-settings-form">
             <input id="listenbrainz-username" type="text" maxlength="128" placeholder="ListenBrainz username" autocomplete="username" required>
@@ -221,16 +224,164 @@
       </button>
     </nav>
 
-    <!-- Cookies Modal -->
-    <div id="cookies-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="cookies-title">
-      <div class="modal-content">
+    <!-- Application settings and cookie management -->
+    <div id="settings-modal" class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-content settings-modal-content">
         <div class="modal-header">
-          <h2 id="cookies-title">Cookies</h2>
-          <button class="modal-close">&times;</button>
+          <div>
+            <h2 id="settings-title">Settings</h2>
+            <p>Application settings live here. Compose only keeps Docker ports and volumes.</p>
+          </div>
+          <button id="settings-close" class="modal-close" aria-label="Close settings">&times;</button>
         </div>
         <div class="modal-body">
+          <form id="settings-form">
+            <div id="settings-message" class="settings-message" role="status" aria-live="polite"></div>
+
+            <section class="settings-section">
+              <h3>Downloads &amp; files</h3>
+              <div class="settings-grid">
+                <label>
+                  <span>Default audio format</span>
+                  <select id="setting-audio-format">
+                    <option value="opus">Opus</option>
+                    <option value="mp3">MP3</option>
+                    <option value="flac">FLAC</option>
+                  </select>
+                </label>
+                <label>
+                  <span>File organization</span>
+                  <select id="setting-organization-mode">
+                    <option value="album">Artist / Year - Album / Track</option>
+                    <option value="flat">Flat folder</option>
+                  </select>
+                </label>
+                <label class="settings-wide">
+                  <span>Download directory</span>
+                  <input id="setting-download-dir" type="text" autocomplete="off">
+                </label>
+                <label class="settings-wide">
+                  <span>Flat filename template</span>
+                  <input id="setting-filename-template" type="text" autocomplete="off">
+                </label>
+                <label class="settings-toggle"><input id="setting-primary-artist" type="checkbox"><span>Use primary artist for folders</span></label>
+                <label class="settings-toggle"><input id="setting-replaygain" type="checkbox"><span>Apply ReplayGain/R128 <small id="replaygain-support"></small></span></label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h3>Search, metadata &amp; reliability</h3>
+              <div class="settings-grid">
+                <label class="settings-toggle"><input id="setting-allow-ugc" type="checkbox"><span>Include user-generated uploads</span></label>
+                <label class="settings-toggle"><input id="setting-log-cookie-usage" type="checkbox"><span>Log cookie usage</span></label>
+                <label>
+                  <span>Unavailable retry cooldown (hours)</span>
+                  <input id="setting-unavailable-cooldown" type="number" min="0" max="87600">
+                </label>
+                <label>
+                  <span>Negative lyrics cache (hours)</span>
+                  <input id="setting-lyrics-cache" type="number" min="0" max="87600">
+                </label>
+                <label>
+                  <span>Cookie retry mode</span>
+                  <select id="setting-cookie-mode">
+                    <option value="auto">Automatic</option>
+                    <option value="always">Always use cookies</option>
+                    <option value="never">Never use cookies</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Cookie retry delay (seconds)</span>
+                  <input id="setting-cookie-retry-delay" type="number" min="0" max="60" step="0.1">
+                </label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h3>Playlists &amp; recommendations</h3>
+              <div class="settings-grid">
+                <label>
+                  <span>Web download M3U playlist</span>
+                  <input id="setting-web-playlist" type="text" maxlength="128" placeholder="Optional">
+                </label>
+                <label class="settings-toggle"><input id="setting-multi-user" type="checkbox"><span>Prefix playlists by Remote-User</span></label>
+                <label class="settings-toggle settings-restart"><input id="setting-listenbrainz-web" type="checkbox"><span>Enable ListenBrainz tab <small>restart</small></span></label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h3>Navidrome login</h3>
+              <p class="settings-description">Optional. Enabling or changing login settings requires a restart.</p>
+              <div class="settings-grid">
+                <label class="settings-wide">
+                  <span>Navidrome URL</span>
+                  <input id="setting-navidrome-url" type="url" placeholder="http://navidrome:4533">
+                </label>
+                <label class="settings-wide">
+                  <span>Session secret (minimum 32 characters)</span>
+                  <span class="settings-secret-row">
+                    <input id="setting-session-secret" type="password" autocomplete="new-password" placeholder="Leave blank to keep the configured secret">
+                    <button id="generate-session-secret" type="button" class="btn">Generate</button>
+                  </span>
+                </label>
+                <label class="settings-toggle"><input id="clear-session-secret" type="checkbox"><span>Remove configured session secret</span></label>
+                <label class="settings-toggle"><input id="setting-session-https-only" type="checkbox"><span>HTTPS-only session cookie</span></label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h3>Gotify notifications</h3>
+              <div class="settings-grid">
+                <label>
+                  <span>Gotify URL</span>
+                  <input id="setting-gotify-url" type="url" placeholder="https://gotify.example.com">
+                </label>
+                <label>
+                  <span>Application token</span>
+                  <input id="setting-gotify-token" type="password" autocomplete="new-password" placeholder="Leave blank to keep the configured token">
+                </label>
+                <label class="settings-toggle"><input id="clear-gotify-token" type="checkbox"><span>Remove configured Gotify token</span></label>
+              </div>
+            </section>
+
+            <section class="settings-section">
+              <h3>Network &amp; advanced</h3>
+              <p class="settings-description">Port, CORS and authentication-related changes become active after a container restart. The host-side port and volume mounts remain Docker settings.</p>
+              <div class="settings-grid">
+                <label>
+                  <span>Internal web port</span>
+                  <input id="setting-web-port" type="number" min="1" max="65535">
+                </label>
+                <label class="settings-wide">
+                  <span>CORS origins</span>
+                  <input id="setting-cors-origins" type="text" placeholder="* or https://example.com">
+                </label>
+                <label class="settings-wide">
+                  <span>Persistent data directory (Docker bootstrap setting)</span>
+                  <input id="setting-data-dir" type="text" readonly>
+                </label>
+              </div>
+            </section>
+
+            <div class="settings-form-actions">
+              <button id="reset-settings-btn" class="btn" type="button">Reset web settings</button>
+              <button id="save-settings-btn" class="btn btn-primary" type="submit">Save settings</button>
+            </div>
+          </form>
+
           <section class="settings-section">
-            <h3>Upload cookies.txt</h3>
+            <h3>Library maintenance</h3>
+            <p class="settings-description">
+              Compare the meaningful words in song names and show possible matches in the Library tab.
+              Musicload never selects or deletes a file automatically.
+            </p>
+            <div class="settings-action-row">
+              <button id="find-duplicates-settings-btn" class="btn btn-primary" type="button">Find duplicates</button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <h3>Cookies</h3>
             <p class="settings-description">
               Upload a cookies.txt file to access age-restricted or
               region-locked content.
@@ -298,9 +449,10 @@
 
       // Format management
       const formatSelector = document.getElementById("format-selector");
+      const serverDefaultAudioFormat = {{ default_audio_format | tojson }};
 
       function initFormat() {
-        const savedFormat = localStorage.getItem("audioFormat") || "opus";
+        const savedFormat = localStorage.getItem("audioFormat") || serverDefaultAudioFormat || "opus";
         formatSelector.value = savedFormat;
       }
 
@@ -561,6 +713,8 @@
       let libraryTracks = [];
       let libraryOffset = 0;
       let libraryTotal = 0;
+      let libraryDuplicateMode = false;
+      let libraryDuplicateData = null;
       const LIBRARY_PAGE_SIZE = 30;
       let currentTab = "explore";
       let queueJobs = [];
@@ -2160,29 +2314,194 @@
         }
       });
 
-      // Cookies modal management
-      const cookiesBtn = document.getElementById("cookies-btn");
-      const cookiesModal = document.getElementById("cookies-modal");
-      const modalClose = cookiesModal.querySelector(".modal-close");
+      // Settings and cookie management
+      const settingsBtn = document.getElementById("settings-btn");
+      const settingsModal = document.getElementById("settings-modal");
+      const settingsClose = document.getElementById("settings-close");
+      const settingsForm = document.getElementById("settings-form");
+      const settingsMessage = document.getElementById("settings-message");
       const cookieFileInput = document.getElementById("cookie-file-input");
       const uploadCookieBtn = document.getElementById("upload-cookie-btn");
       const deleteCookieBtn = document.getElementById("delete-cookie-btn");
       const cookieStatus = document.getElementById("cookie-status");
+      const findDuplicatesSettingsBtn = document.getElementById("find-duplicates-settings-btn");
 
-      // Open cookies
-      cookiesBtn.addEventListener("click", async () => {
-        cookiesModal.classList.add("active");
-        await refreshCookieStatus();
-      });
+      const settingsFields = {
+        download_dir: "setting-download-dir",
+        data_dir: "setting-data-dir",
+        audio_format: "setting-audio-format",
+        filename_template: "setting-filename-template",
+        organization_mode: "setting-organization-mode",
+        use_primary_artist: "setting-primary-artist",
+        web_port: "setting-web-port",
+        web_playlist_name: "setting-web-playlist",
+        gotify_url: "setting-gotify-url",
+        cookie_mode: "setting-cookie-mode",
+        cookie_retry_delay: "setting-cookie-retry-delay",
+        log_cookie_usage: "setting-log-cookie-usage",
+        cors_origins: "setting-cors-origins",
+        unavailable_cooldown_hours: "setting-unavailable-cooldown",
+        lyrics_cache_hours: "setting-lyrics-cache",
+        multi_user: "setting-multi-user",
+        replaygain: "setting-replaygain",
+        allow_ugc: "setting-allow-ugc",
+        navidrome_url: "setting-navidrome-url",
+        session_https_only: "setting-session-https-only",
+        listenbrainz_web: "setting-listenbrainz-web",
+      };
 
-      // Close cookies
-      modalClose.addEventListener("click", () => {
-        cookiesModal.classList.remove("active");
-      });
-      cookiesModal.addEventListener("click", (e) => {
-        if (e.target === cookiesModal) {
-          cookiesModal.classList.remove("active");
+      function populateSettings(data) {
+        for (const [name, id] of Object.entries(settingsFields)) {
+          const input = document.getElementById(id);
+          if (!input) continue;
+          const value = data.values[name];
+          if (input.type === "checkbox") input.checked = Boolean(value);
+          else input.value = value ?? "";
         }
+        const sessionSecret = document.getElementById("setting-session-secret");
+        const gotifyToken = document.getElementById("setting-gotify-token");
+        sessionSecret.value = "";
+        gotifyToken.value = "";
+        sessionSecret.placeholder = data.configured.session_secret
+          ? "Configured — leave blank to keep"
+          : "Minimum 32 characters";
+        gotifyToken.placeholder = data.configured.gotify_token
+          ? "Configured — leave blank to keep"
+          : "Optional application token";
+        document.getElementById("clear-session-secret").checked = false;
+        document.getElementById("clear-gotify-token").checked = false;
+        const replaygainSupport = document.getElementById("replaygain-support");
+        replaygainSupport.textContent = data.capabilities.rsgain_available
+          ? "available"
+          : "rsgain not installed";
+        replaygainSupport.classList.toggle("settings-warning", !data.capabilities.rsgain_available);
+      }
+
+      async function loadSettings() {
+        const response = await fetch("/api/settings");
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not load settings");
+        populateSettings(data);
+      }
+
+      settingsBtn.addEventListener("click", async () => {
+        settingsModal.classList.add("active");
+        settingsMessage.textContent = "Loading settings…";
+        settingsMessage.className = "settings-message";
+        try {
+          await Promise.all([loadSettings(), refreshCookieStatus()]);
+          settingsMessage.textContent = "";
+        } catch (error) {
+          settingsMessage.textContent = error.message;
+          settingsMessage.className = "settings-message error";
+        }
+      });
+
+      settingsClose.addEventListener("click", () => {
+        settingsModal.classList.remove("active");
+      });
+      settingsModal.addEventListener("click", (event) => {
+        if (event.target === settingsModal) {
+          settingsModal.classList.remove("active");
+        }
+      });
+      findDuplicatesSettingsBtn.addEventListener("click", () => {
+        settingsModal.classList.remove("active");
+        updateUrlParams("", "library");
+        setActiveTab("library", true);
+        loadLibraryDuplicates();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && settingsModal.classList.contains("active")) {
+          settingsModal.classList.remove("active");
+        }
+      });
+
+      document.getElementById("generate-session-secret").addEventListener("click", () => {
+        const bytes = new Uint8Array(32);
+        crypto.getRandomValues(bytes);
+        document.getElementById("setting-session-secret").value = Array.from(
+          bytes,
+          (byte) => byte.toString(16).padStart(2, "0"),
+        ).join("");
+        document.getElementById("clear-session-secret").checked = false;
+      });
+
+      settingsForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const saveButton = document.getElementById("save-settings-btn");
+        saveButton.disabled = true;
+        saveButton.textContent = "Saving…";
+        settingsMessage.textContent = "";
+        settingsMessage.className = "settings-message";
+        const value = (id) => document.getElementById(id).value.trim();
+        const checked = (id) => document.getElementById(id).checked;
+        const payload = {
+          download_dir: value("setting-download-dir"),
+          audio_format: value("setting-audio-format"),
+          filename_template: value("setting-filename-template"),
+          organization_mode: value("setting-organization-mode"),
+          use_primary_artist: checked("setting-primary-artist"),
+          web_port: Number(value("setting-web-port")),
+          web_playlist_name: value("setting-web-playlist") || null,
+          gotify_url: value("setting-gotify-url") || null,
+          gotify_token: value("setting-gotify-token") || null,
+          clear_gotify_token: checked("clear-gotify-token"),
+          cookie_mode: value("setting-cookie-mode"),
+          cookie_retry_delay: Number(value("setting-cookie-retry-delay")),
+          log_cookie_usage: checked("setting-log-cookie-usage"),
+          cors_origins: value("setting-cors-origins"),
+          unavailable_cooldown_hours: Number(value("setting-unavailable-cooldown")),
+          lyrics_cache_hours: Number(value("setting-lyrics-cache")),
+          multi_user: checked("setting-multi-user"),
+          replaygain: checked("setting-replaygain"),
+          allow_ugc: checked("setting-allow-ugc"),
+          navidrome_url: value("setting-navidrome-url") || null,
+          session_secret: value("setting-session-secret") || null,
+          clear_session_secret: checked("clear-session-secret"),
+          session_https_only: checked("setting-session-https-only"),
+          listenbrainz_web: checked("setting-listenbrainz-web"),
+        };
+        try {
+          const response = await fetch("/api/settings", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Could not save settings");
+          populateSettings(data);
+          formatSelector.value = data.values.audio_format;
+          localStorage.setItem("audioFormat", data.values.audio_format);
+          settingsMessage.textContent = data.message;
+          settingsMessage.className = "settings-message success";
+        } catch (error) {
+          settingsMessage.textContent = error.message;
+          settingsMessage.className = "settings-message error";
+        } finally {
+          saveButton.disabled = false;
+          saveButton.textContent = "Save settings";
+        }
+      });
+
+      document.getElementById("reset-settings-btn").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        await runConfirmedAction({
+          button,
+          title: "Reset web settings?",
+          message: "Musicload will use environment values and built-in defaults again after a restart. Uploaded cookies are kept.",
+          actionLabel: "Reset Settings",
+          pendingLabel: "Resetting…",
+          errorLabel: "Reset failed",
+          action: async () => {
+            const response = await fetch("/api/settings", { method: "DELETE" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok) throw new Error(data.detail || "Reset failed");
+            await loadSettings();
+            settingsMessage.textContent = data.message;
+            settingsMessage.className = "settings-message success";
+          },
+        });
       });
 
       // Refresh cookie status
@@ -3027,6 +3346,7 @@
       }
 
       async function loadLibraryContent(reset = true, query = searchInput.value.trim()) {
+        libraryDuplicateMode = false;
         if (reset) {
           libraryOffset = 0;
           libraryTracks = [];
@@ -3128,6 +3448,97 @@
         });
       }
 
+      async function loadLibraryDuplicates() {
+        libraryDuplicateMode = true;
+        libraryResults.innerHTML = `
+          <div class="explore-loading">
+            <span class="button-spinner" aria-hidden="true"></span>
+            Scanning local files for duplicates…
+          </div>`;
+        try {
+          const response = await fetch("/api/library/duplicates");
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.detail || "Duplicate scan failed");
+          libraryDuplicateData = data;
+          renderLibraryDuplicates(data);
+        } catch (error) {
+          libraryResults.innerHTML = `<div class="explore-error">Duplicate scan failed: ${escapeHtml(error.message)}</div>`;
+        }
+      }
+
+      function renderLibraryDuplicates(data) {
+        let html = `
+          <div class="explore-playlist-header library-header duplicate-library-header">
+            <div>
+              <h2>Library duplicates</h2>
+              <span class="explore-track-count">${data.total_groups} groups · ${data.duplicate_files} files · ${data.scanned_files} scanned</span>
+            </div>
+            <div class="explore-section-actions">
+              <button id="duplicates-back-btn" class="pagination-btn">All files</button>
+              <button id="duplicates-rescan-btn" class="pagination-btn">Scan again</button>
+            </div>
+          </div>
+          <p class="duplicate-explanation">Possible matches have the same meaningful words in their song names. Common additions such as “official audio”, “lyrics”, “copy”, and remaster years are ignored. Review the cover, song details and audio before deciding. Musicload never selects or deletes a file automatically.</p>
+        `;
+
+        if (!data.groups.length) {
+          html += `
+            <div class="duplicates-empty">
+              <strong>No duplicates found</strong>
+              <span>No song names with the same meaningful words were found.</span>
+            </div>`;
+        } else {
+          html += '<div class="duplicate-groups">';
+          html += data.groups.map((group, index) => `
+            <section class="duplicate-group ${group.kind}">
+              <div class="duplicate-group-header">
+                <div>
+                  <span class="duplicate-kind">Possible name match</span>
+                  <strong>${group.tracks.length} matching files</strong>
+                </div>
+                <span class="duplicate-group-number">Group ${index + 1}</span>
+              </div>
+              <div class="explore-tracks-list">
+                ${group.tracks.map((track) => `
+                  <div class="track duplicate-track" data-entry-path="${escapeHtml(track.entry_path)}">
+                    <div class="track-main">
+                      <img class="track-cover library-cover" src="/api/library/thumbnail?entry_path=${encodeURIComponent(track.entry_path)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
+                      <div class="track-info">
+                        <div class="track-title">${escapeHtml(track.title)}</div>
+                        <div class="track-artist">${escapeHtml(track.artist)}${track.album ? " - " + escapeHtml(track.album) : ""}</div>
+                        <div class="track-meta">
+                          ${track.duration ? `<span>${track.duration}</span>` : ""}
+                          <span>${(track.file_size / (1024 * 1024)).toFixed(1)} MB</span>
+                          <span>${escapeHtml((track.format || "audio").toUpperCase())}</span>
+                        </div>
+                        <div class="duplicate-path">${escapeHtml(track.entry_path)}</div>
+                      </div>
+                    </div>
+                    <div class="track-actions">
+                      <button class="play-btn library-play-btn" data-entry-path="${escapeHtml(track.entry_path)}" aria-label="Play file">▶</button>
+                      <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}">Delete</button>
+                    </div>
+                  </div>
+                `).join("")}
+              </div>
+            </section>
+          `).join("");
+          html += "</div>";
+        }
+
+        libraryResults.innerHTML = html;
+        document.getElementById("duplicates-back-btn").addEventListener("click", () => {
+          loadLibraryContent(true, searchInput.value.trim());
+        });
+        document.getElementById("duplicates-rescan-btn").addEventListener("click", loadLibraryDuplicates);
+        libraryResults.querySelectorAll(".library-play-btn").forEach((button) => {
+          button.addEventListener("click", () => toggleLocalPlay(button.dataset.entryPath, button));
+        });
+        libraryResults.querySelectorAll(".library-delete-btn").forEach((button) => {
+          button.addEventListener("click", handleLibraryDelete);
+        });
+      }
+
       async function toggleLocalPlay(entryPath, button) {
         if (currentPlayingButton === button) {
           await toggleMiniPlayer();
@@ -3182,6 +3593,11 @@
             if (!res.ok) {
               const err = await res.json().catch(() => null);
               throw new Error(err?.detail || "Failed to delete file");
+            }
+            if (libraryDuplicateMode) {
+              showStatus(`Deleted: ${title}`);
+              await loadLibraryDuplicates();
+              return;
             }
             libraryTracks = libraryTracks.filter((t) => t.entry_path !== entryPath);
             libraryTotal -= 1;

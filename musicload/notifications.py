@@ -75,6 +75,31 @@ def _get_notifier() -> Optional[GotifyNotifier]:
     return GotifyNotifier(config.gotify_url, config.gotify_token)
 
 
+def send_download_notification(
+    title: str,
+    artist: str,
+    *,
+    success: bool,
+    error: str | None = None,
+) -> None:
+    """Send an optional Gotify notification for a queued download."""
+    notifier = _get_notifier()
+    if not notifier:
+        return
+    if success:
+        notifier.send(
+            title="Musicload download complete",
+            message=f"{artist} – {title}",
+            priority=4,
+        )
+        return
+    notifier.send(
+        title="Musicload download failed",
+        message=f"{artist} – {title}\n{error or 'Unknown error'}",
+        priority=7,
+    )
+
+
 def send_sync_notification(
     name: str,
     sync_type: str,

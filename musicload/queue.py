@@ -224,6 +224,14 @@ class QueueManager:
             if job.playlist_name and audio_path:
                 add_to_m3u([audio_path], job.playlist_name, config.download_dir)
             logger.info("Job completed: %s - %s (id=%s)", job.artist, job.title, job.id)
+            from musicload.notifications import send_download_notification
+
+            await asyncio.to_thread(
+                send_download_notification,
+                job.title,
+                job.artist,
+                success=True,
+            )
 
         except (DownloadCancelledError, ExistingDownloadError) as error:
             if isinstance(error, ExistingDownloadError) and job.playlist_name:
@@ -243,6 +251,15 @@ class QueueManager:
                 current_job.status = JobStatus.FAILED
                 current_job.error = str(e)
                 current_job.completed_at = datetime.now()
+            from musicload.notifications import send_download_notification
+
+            await asyncio.to_thread(
+                send_download_notification,
+                job.title,
+                job.artist,
+                success=False,
+                error=str(e),
+            )
 
         # Cleanup old jobs to prevent memory leak
         await self.cleanup_old_jobs()

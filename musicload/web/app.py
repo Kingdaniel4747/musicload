@@ -249,6 +249,35 @@ class ListenBrainzSettingsRequest(BaseModel):
     timezone: str = Field(default="UTC", min_length=1, max_length=64)
 
 
+class AppSettingsRequest(BaseModel):
+    """Web-managed application settings."""
+
+    download_dir: str = Field(min_length=1, max_length=4096)
+    audio_format: str = "opus"
+    filename_template: str = Field(min_length=1, max_length=512)
+    organization_mode: str = "album"
+    use_primary_artist: bool = False
+    web_port: int = Field(default=8000, ge=1, le=65535)
+    web_playlist_name: str | None = Field(default=None, max_length=128)
+    gotify_url: str | None = Field(default=None, max_length=2048)
+    gotify_token: str | None = Field(default=None, max_length=1024)
+    clear_gotify_token: bool = False
+    cookie_mode: str = "auto"
+    cookie_retry_delay: float = Field(default=1.0, ge=0, le=60)
+    log_cookie_usage: bool = True
+    cors_origins: str = Field(default="*", min_length=1, max_length=4096)
+    unavailable_cooldown_hours: int = Field(default=168, ge=0, le=87600)
+    lyrics_cache_hours: int = Field(default=168, ge=0, le=87600)
+    multi_user: bool = False
+    replaygain: bool = False
+    allow_ugc: bool = False
+    navidrome_url: str | None = Field(default=None, max_length=2048)
+    session_secret: str | None = Field(default=None, max_length=1024)
+    clear_session_secret: bool = False
+    session_https_only: bool = True
+    listenbrainz_web: bool = False
+
+
 class DownloadResponse(BaseModel):
     """Response body for download endpoint."""
 
@@ -416,6 +445,7 @@ async def index(request: Request):
             "is_admin": is_admin,
             "can_view_logs": is_admin,
             "listenbrainz_enabled": config.listenbrainz_web,
+            "default_audio_format": config.audio_format,
         },
     )
 
@@ -1505,9 +1535,13 @@ async def add_to_queue(request: QueueAddRequest, http_request: Request):
 
     from musicload.library_index import find_existing_track
 
+    runtime_config = get_config()
+    remote_user = _get_remote_user(http_request, runtime_config)
+    playlist_name = runtime_config.effective_playlist_name(remote_user)
+
     existing = await asyncio.to_thread(
         find_existing_track,
-        config.data_dir,
+        runtime_config.data_dir,
         request.video_id,
         request.title,
         request.artist,
@@ -1526,6 +1560,7 @@ async def add_to_queue(request: QueueAddRequest, http_request: Request):
         format=audio_format,
         artists=request.artists,
         album=request.album,
+        playlist_name=playlist_name,
     )
 
     return QueueAddResponse(job_id=job_id, status="queued")
@@ -1557,10 +1592,14 @@ async def add_album_to_queue(request: QueueAddAlbumRequest, http_request: Reques
 
         from musicload.library_index import find_existing_video
 
+        runtime_config = get_config()
+        remote_user = _get_remote_user(http_request, runtime_config)
+        playlist_name = runtime_config.effective_playlist_name(remote_user)
+
         job_ids = []
         for track_number, track in enumerate(tracks, start=1):
             existing = await asyncio.to_thread(
-                find_existing_video, config.data_dir, track.video_id
+                find_existing_video, runtime_config.data_dir, track.video_id
             )
             if existing:
                 continue
@@ -1577,6 +1616,7 @@ async def add_album_to_queue(request: QueueAddAlbumRequest, http_request: Reques
                 album_artist=request.artist,
                 album_year=request.album_year,
                 track_number=track_number,
+                playlist_name=playlist_name,
             )
             job_ids.append(job_id)
 
@@ -1885,6 +1925,194 @@ async def api_image_proxy(url: str = Query(..., description="Image URL to proxy"
     )
 
 
+def _clean_optional_setting(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _settings_response() -> dict:
+    """Return effective values while redacting stored secrets."""
+    from musicload.replaygain import is_rsgain_available
+    from musicload.settings import RESTART_REQUIRED_SETTINGS, load_settings
+
+    effective = get_config()
+    overrides = load_settings(effective.data_dir)
+    cors_value = "*" if effective.cors_origins == ["*"] else ", ".join(effective.cors_origins)
+    values = {
+        "download_dir": str(effective.download_dir),
+        "data_dir": str(effective.data_dir),
+        "audio_format": effective.audio_format,
+        "filename_template": effective.filename_template,
+        "organization_mode": effective.organization_mode,
+        "use_primary_artist": effective.use_primary_artist,
+        "web_port": effective.web_port,
+        "web_playlist_name": effective.web_playlist_name or "",
+        "gotify_url": effective.gotify_url or "",
+        "cookie_mode": effective.cookie_mode,
+        "cookie_retry_delay": effective.cookie_retry_delay,
+        "log_cookie_usage": effective.log_cookie_usage,
+        "cors_origins": cors_value,
+        "unavailable_cooldown_hours": effective.unavailable_cooldown_hours,
+        "lyrics_cache_hours": effective.lyrics_cache_hours,
+        "multi_user": effective.multi_user,
+        "replaygain": effective.replaygain,
+        "allow_ugc": effective.allow_ugc,
+        "navidrome_url": effective.navidrome_url or "",
+        "session_https_only": effective.session_https_only,
+        "listenbrainz_web": effective.listenbrainz_web,
+    }
+    return {
+        "values": values,
+        "configured": {
+            "gotify_token": bool(effective.gotify_token),
+            "session_secret": bool(effective.session_secret),
+        },
+        "overridden": sorted(overrides),
+        "restart_required_fields": sorted(RESTART_REQUIRED_SETTINGS),
+        "capabilities": {"rsgain_available": is_rsgain_available()},
+    }
+
+
+@app.get("/api/settings")
+async def api_get_settings(request: Request):
+    """Return effective application settings for an administrator."""
+    _require_admin(request)
+    return _settings_response()
+
+
+@app.put("/api/settings")
+async def api_save_settings(payload: AppSettingsRequest, request: Request):
+    """Persist application settings managed by the web interface."""
+    _require_admin(request)
+    from urllib.parse import urlparse
+
+    from musicload.settings import load_settings, save_settings
+
+    if payload.audio_format not in {"opus", "mp3", "flac"}:
+        raise HTTPException(status_code=400, detail="Invalid audio format")
+    if payload.organization_mode not in {"flat", "album"}:
+        raise HTTPException(status_code=400, detail="Invalid organization mode")
+    if payload.cookie_mode not in {"auto", "always", "never"}:
+        raise HTTPException(status_code=400, detail="Invalid cookie mode")
+
+    navidrome_url = _clean_optional_setting(payload.navidrome_url)
+    gotify_url = _clean_optional_setting(payload.gotify_url)
+    for label, url in (("Navidrome URL", navidrome_url), ("Gotify URL", gotify_url)):
+        if url:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise HTTPException(status_code=400, detail=f"{label} must be an HTTP(S) URL")
+
+    playlist_name = _clean_optional_setting(payload.web_playlist_name)
+    if playlist_name and (
+        playlist_name in {".", ".."}
+        or "/" in playlist_name
+        or "\\" in playlist_name
+    ):
+        raise HTTPException(status_code=400, detail="Playlist name must not contain a path")
+
+    cors_origins = payload.cors_origins.strip()
+    if cors_origins != "*":
+        origins = [origin.strip() for origin in cors_origins.split(",") if origin.strip()]
+        if not origins or any(
+            urlparse(origin).scheme not in {"http", "https"} or not urlparse(origin).netloc
+            for origin in origins
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="CORS origins must be '*' or comma-separated HTTP(S) origins",
+            )
+        cors_origins = ",".join(origins)
+
+    download_dir = payload.download_dir.strip()
+    filename_template = payload.filename_template.strip()
+    if not download_dir:
+        raise HTTPException(status_code=400, detail="Download directory is required")
+    if not filename_template:
+        raise HTTPException(status_code=400, detail="Filename template is required")
+
+    effective = get_config()
+    existing_overrides = load_settings(effective.data_dir)
+
+    new_session_secret = _clean_optional_setting(payload.session_secret)
+    if payload.clear_session_secret:
+        candidate_session_secret = None
+    elif new_session_secret is not None:
+        candidate_session_secret = new_session_secret
+    else:
+        candidate_session_secret = effective.session_secret
+    if navidrome_url and (
+        not candidate_session_secret or len(candidate_session_secret) < 32
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Navidrome login requires a session secret with at least 32 characters",
+        )
+
+    values = {
+        "download_dir": download_dir,
+        "audio_format": payload.audio_format,
+        "filename_template": filename_template,
+        "organization_mode": payload.organization_mode,
+        "use_primary_artist": payload.use_primary_artist,
+        "web_port": payload.web_port,
+        "web_playlist_name": playlist_name,
+        "gotify_url": gotify_url,
+        "cookie_mode": payload.cookie_mode,
+        "cookie_retry_delay": payload.cookie_retry_delay,
+        "log_cookie_usage": payload.log_cookie_usage,
+        "cors_origins": cors_origins,
+        "unavailable_cooldown_hours": payload.unavailable_cooldown_hours,
+        "lyrics_cache_hours": payload.lyrics_cache_hours,
+        "multi_user": payload.multi_user,
+        "replaygain": payload.replaygain,
+        "allow_ugc": payload.allow_ugc,
+        "navidrome_url": navidrome_url,
+        "session_https_only": payload.session_https_only,
+        "listenbrainz_web": payload.listenbrainz_web,
+    }
+
+    if payload.clear_session_secret:
+        values["session_secret"] = None
+    elif new_session_secret is not None:
+        values["session_secret"] = new_session_secret
+    elif "session_secret" in existing_overrides:
+        values["session_secret"] = existing_overrides["session_secret"]
+
+    new_gotify_token = _clean_optional_setting(payload.gotify_token)
+    if payload.clear_gotify_token:
+        values["gotify_token"] = None
+    elif new_gotify_token is not None:
+        values["gotify_token"] = new_gotify_token
+    elif "gotify_token" in existing_overrides:
+        values["gotify_token"] = existing_overrides["gotify_token"]
+
+    await asyncio.to_thread(save_settings, effective.data_dir, values)
+    logger.info("Application settings updated by %s", _current_account_name(request))
+    return {
+        "success": True,
+        "message": "Settings saved. Restart Musicload to apply every change.",
+        **_settings_response(),
+    }
+
+
+@app.delete("/api/settings")
+async def api_reset_settings(request: Request):
+    """Remove web overrides and return to environment/default configuration."""
+    _require_admin(request)
+    from musicload.settings import clear_settings
+
+    effective = get_config()
+    removed = await asyncio.to_thread(clear_settings, effective.data_dir)
+    return {
+        "success": True,
+        "removed": removed,
+        "message": "Web settings reset. Restart Musicload to apply environment defaults.",
+    }
+
+
 # Cookie management endpoints
 @app.post("/api/settings/cookies/upload")
 async def upload_cookies(request: Request, file: UploadFile = File(...)):
@@ -2125,6 +2353,100 @@ def _scan_library_files(download_dir: Path) -> list[Path]:
     return files
 
 
+def _normalise_duplicate_value(value: str | None) -> str:
+    import unicodedata
+
+    text = unicodedata.normalize("NFKD", (value or "").casefold())
+    text = "".join(character for character in text if not unicodedata.combining(character))
+    return re.sub(r"\W+", " ", text, flags=re.UNICODE).strip()
+
+
+_DUPLICATE_TITLE_NOISE = {
+    "audio",
+    "copy",
+    "hd",
+    "hq",
+    "kopie",
+    "lyric",
+    "lyrics",
+    "music",
+    "official",
+    "original",
+    "remaster",
+    "remastered",
+    "uhd",
+    "version",
+    "video",
+}
+
+
+def _duplicate_title_words(title: str | None) -> tuple[str, ...]:
+    """Return the meaningful words used to compare two song names."""
+    normalised_words = _normalise_duplicate_value(title).split()
+    words = []
+    for word in normalised_words:
+        if word in _DUPLICATE_TITLE_NOISE:
+            continue
+        if len(word) == 4 and word.isdecimal() and 1900 <= int(word) <= 2099:
+            continue
+        words.append(word)
+    return tuple(sorted(words or normalised_words))
+
+
+def _find_library_duplicates_sync(download_dir: Path) -> dict:
+    """Find possible duplicates with the same meaningful song-name words."""
+    records: list[dict] = []
+    for file_path in _scan_library_files(download_dir):
+        entry_path = str(file_path.relative_to(download_dir))
+        stat = file_path.stat()
+        info = _extract_track_info(entry_path, download_dir)
+        records.append(
+            {
+                "entry_path": entry_path,
+                "title": info["title"] or file_path.stem,
+                "artist": info["artist"],
+                "album": info["album"],
+                "duration": info["duration"],
+                "file_size": stat.st_size,
+                "format": file_path.suffix.lower().lstrip("."),
+                "modified_at": stat.st_mtime,
+            }
+        )
+
+    by_title_words: dict[tuple[str, ...], list[dict]] = {}
+    for record in records:
+        title_words = _duplicate_title_words(record["title"])
+        if not title_words:
+            continue
+        by_title_words.setdefault(title_words, []).append(record)
+
+    groups = [
+        {
+            "kind": "name",
+            "label": "Matching song name",
+            "confidence": "possible",
+            "key": " ".join(title_words),
+            "matched_words": list(title_words),
+            "tracks": matches,
+        }
+        for title_words, matches in by_title_words.items()
+        if len(matches) >= 2
+    ]
+    groups.sort(key=lambda group: group["key"])
+    duplicate_paths = {
+        track["entry_path"]
+        for group in groups
+        for track in group["tracks"]
+    }
+
+    return {
+        "groups": groups,
+        "total_groups": len(groups),
+        "duplicate_files": len(duplicate_paths),
+        "scanned_files": len(records),
+    }
+
+
 def _build_library_cache_sync() -> dict[str, tuple[float, int, dict]]:
     """Scan Local Files once and reuse unchanged metadata from SQLite."""
     from musicload.web.library_cache import load_cached_files, replace_cached_files
@@ -2224,6 +2546,20 @@ async def api_library_files(
     tracks = matching_tracks[offset : offset + limit]
 
     return LibraryTracksResponse(tracks=tracks, total=total, limit=limit, offset=offset)
+
+
+@app.get("/api/library/duplicates")
+async def api_library_duplicates(request: Request):
+    """Scan the local library for possible duplicates based on song names."""
+    _require_admin(request)
+    runtime_config = get_config()
+    try:
+        return await asyncio.to_thread(
+            _find_library_duplicates_sync, runtime_config.download_dir
+        )
+    except OSError as error:
+        logger.error("Duplicate scan failed: %s", error)
+        raise HTTPException(status_code=500, detail=f"Duplicate scan failed: {error}")
 
 
 @app.get("/api/library/play")

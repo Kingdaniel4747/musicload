@@ -10,18 +10,8 @@ services:
       # Change only the path on the left to your music folder or NAS path.
       - ./music/folder:/downloads
       - ./.musicload:/data
-    environment:
-      MUSICLOAD_AUDIO_FORMAT: opus
-      MUSICLOAD_ORGANIZATION_MODE: album
-      # Optional ListenBrainz tab with its per-user weekly scheduler:
-      # MUSICLOAD_LISTENBRAINZ_WEB: "true"
-      # Enable Navidrome login for the complete web interface:
-      # NAVIDROME_URL: http://navidrome:4533
-      # MUSICLOAD_SESSION_SECRET: replace-with-at-least-32-random-characters
-      # Keep true behind HTTPS. Use false only for local HTTP testing.
-      # MUSICLOAD_SESSION_HTTPS_ONLY: "true"
-      # GOTIFY_URL: https://gotify.example.com
-      # GOTIFY_TOKEN: your-app-token
+    # Configure Musicload after the first start through the Settings button.
+    # Host ports and volume mounts remain Docker-level settings.
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true

@@ -1,220 +1,191 @@
 # Musicload
 
+Musicload is a self-hosted, mobile-friendly music discovery and download companion for Navidrome. Search and preview music, download complete albums or playlists, keep local files organized, and let Navidrome discover the results through its normal library scan.
 
-<p align="center">
-  <img src="musicload-logo.svg" alt="Musicload" width="440" />
-</p>
+Musicload writes to your own music directory. Navidrome remains the player and library server; no direct Navidrome API connection is required for library synchronization.
 
-Musicload is the missing link between **Music** and **Navidrome**. It is a fast, mobile-friendly web app for finding music, downloading full albums, managing local files, and automatically fetching your ListenBrainz Weekly Exploration.
+## Features
 
-It deliberately stays simple: Musicload downloads music into your own library, and Navidrome remains your player and library server.
-
-## Preview
-
-<p align="center">
-  <img src="musicload-desktop-showcase.png" alt="Musicload running on a laptop" width="100%" />
-</p>
-
-<p align="center">
-  <img src="musicload-mobile-showcase.png" alt="Musicload Explore, Downloads, and Library on mobile" width="100%" />
-</p>
-
-## How the workflow works
-
-### 1. Identify and share a song from your phone
-
-```mermaid
-flowchart TD
-    A["Google identifies the song"]
-    B["Tap Share"]
-    C["Send the result to Musicload"]
-    D["Preview the matching song"]
-    E["Download"]
-    F["Saved as Artist / Album / Track"]
-    G["Navidrome scans the music folder"]
-    H["The song is ready to play"]
-
-    A --> B --> C --> D --> E --> F --> G --> H
-
-    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
-    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
-
-    class C,D,E,F musicload;
-    class H final;
-```
-
-### 2. Automatic ListenBrainz Weekly Exploration
-
-```mermaid
-flowchart TD
-    A["Listen to music in Navidrome"]
-    B["Navidrome sends your listening history to ListenBrainz"]
-    C["ListenBrainz creates Weekly Exploration"]
-    D["Musicload checks at your selected weekday and time"]
-    E["New tracks are downloaded automatically"]
-    F["Saved as Artist / Album / Track"]
-    G["Navidrome scans the music folder"]
-    H["The new recommendations are ready to play"]
-
-    A --> B --> C --> D --> E --> F --> G --> H
-
-    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
-    classDef listenbrainz fill:#27203d,stroke:#a78bfa,color:#ffffff,stroke-width:2px;
-    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
-
-    class C listenbrainz;
-    class D,E,F musicload;
-    class H final;
-```
-
-### 3. Search and download manually
-
-```mermaid
-flowchart TD
-    A["Open Musicload"]
-    B["Search for a song, artist, album, or URL"]
-    C["Preview the result"]
-    D["Press Download"]
-    E["Saved as Artist / Album / Track"]
-    F["Navidrome scans the music folder"]
-    G["The song is ready to play"]
-
-    A --> B --> C --> D --> E --> F --> G
-
-    classDef musicload fill:#18191d,stroke:#e00035,color:#ffffff,stroke-width:2px;
-    classDef final fill:#143222,stroke:#32d477,color:#ffffff,stroke-width:2px;
-
-    class A,B,C,D,E musicload;
-    class G final;
-```
-
-All three workflows use the same shared music folder. Musicload does not require direct Navidrome API access—Navidrome discovers newly downloaded tracks through its regular library scan.
-
-
-Musicload does not need direct Navidrome API access for any of these workflows. Both applications simply use the same music directory, and Navidrome's regular scanner discovers the new files.
-
-1. Connect Navidrome to your ListenBrainz account in Navidrome's settings. Your listening history is then sent to ListenBrainz.
-2. ListenBrainz creates your **Weekly Exploration** recommendations.
-3. Musicload's web container reads those recommendations on the weekday and time configured in your account and downloads new tracks.
-4. With `MUSICLOAD_ORGANIZATION_MODE: album`, downloads are stored as `Artist/Album/Track` instead of a flat folder.
-5. Navidrome scans the same music folder and adds new files to its library automatically at its next regular scan.
-
-Manual downloads work in exactly the same way: search or explore in Musicload, press **Download**, and the track is placed in the album structure. To add your own music, simply copy it into the same `Artist/Album` folder; Navidrome and Musicload will see it as local music.
+- Search songs and albums on YouTube Music.
+- Paste YouTube, YouTube Music, and Deezer playlist links.
+- Explore country charts, global charts, new releases, moods, genres, and curated playlists.
+- Preview online results and local files in the built-in mini-player.
+- Download individual tracks, complete albums, playlists, charts, or recommendations.
+- Choose Opus, MP3, or FLAC output. FLAC is an output format and does not guarantee that the source was lossless.
+- Track live download progress, speed, and ETA; cancel one or all active downloads.
+- Organize files as `Artist/Year - Album/Track - Title` or use a flat directory.
+- Add artwork, metadata, multi-artist tags, and LRCLIB lyrics in sidecar `.lrc` files.
+- Avoid repeat downloads through a persistent recording index and an unavailable-track cooldown.
+- Search, play, and delete files in the local library.
+- Find possible duplicates by matching meaningful words in song names, then review and delete files manually.
+- Install Musicload as a PWA and share recognized songs from Android directly to the search.
+- Optionally show each user's ListenBrainz Weekly Exploration and download changed recommendations on a weekly schedule.
+- Optionally use Navidrome accounts for login and administrator permissions.
+- Manage application settings and `cookies.txt` from the web interface.
+- Optionally write web downloads to M3U playlists and send Gotify notifications.
+- Use the web interface or the `musicload` command-line client.
 
 ## Quick start
 
-You need only `docker-compose.yml`; it starts the single Musicload web container.
-
-In `docker-compose.yml`, set the left side of this volume to your real music folder or NAS path:
+Clone the repository, then change only the left side of the music volume in `docker-compose.yml`:
 
 ```yaml
-- /mnt/storage/media/Musik:/downloads
+volumes:
+  - /mnt/storage/media/Music:/downloads
+  - ./.musicload:/data
 ```
 
-Then start everything with one command:
+Start Musicload:
 
 ```bash
 docker compose up -d
 ```
 
-Open `http://SERVER_IP:8000`.
+Open `http://SERVER_IP:8000` and select the **Settings** button. Application options are stored in `/data/settings.json` and survive container updates.
 
+The host port and volume mounts remain Docker-level settings because Docker needs them before Musicload starts. All Musicload behavior is configured in the web interface. Existing environment variables remain supported as fallbacks; saved web settings take precedence.
 
-Musicload keeps its state, cookies, accounts, and caches in the hidden `.musicload` folder inside your music directory. Do not delete that folder unless you intentionally want to reset Musicload.
+## Use the same library as Navidrome
 
-## Navidrome setup
-
-Mount the **same host music folder** into both containers. Musicload needs write access; Navidrome can use a read-only mount:
+Mount the same host music folder into both containers:
 
 ```yaml
-# Musicload
-- /mnt/storage/media/Musik:/downloads
+# Musicload: write access
+- /mnt/storage/media/Music:/downloads
 
-# Navidrome
-- /mnt/storage/media/Musik:/music:ro
+# Navidrome: read-only access is sufficient
+- /mnt/storage/media/Music:/music:ro
 ```
 
-That shared folder is all Navidrome needs to discover Musicload downloads. Ensure Navidrome's normal library scanner is enabled; new music appears after its next scan.
+Musicload's default album layout is:
+
+```text
+Artist/
+└── 2026 - Album/
+    ├── 01 - First Track.opus
+    ├── 01 - First Track.lrc
+    └── 02 - Second Track.opus
+```
+
+Navidrome adds new files during its next regular library scan.
+
+## Web settings
+
+The administrator can configure the following from the Settings dialog:
+
+- Default audio format and file organization
+- Download directory and flat filename template
+- Primary-artist folder naming
+- ReplayGain/R128 processing when `rsgain` is available
+- Official-audio/UGC filtering
+- Retry cooldowns and lyrics-cache lifetime
+- Cookie behavior and uploaded `cookies.txt`
+- M3U playlist creation and Remote-User prefixes
+- ListenBrainz web integration
+- Navidrome login, signed-session secret, and HTTPS-only cookies
+- Gotify download notifications
+- Internal web port and CORS origins
+
+Settings used while the server or authentication middleware starts are marked as restart-sensitive. Restart the container after changing the web port, CORS, ListenBrainz, or Navidrome login settings:
+
+```bash
+docker compose restart musicload
+```
+
+If the internal web port changes, update the container side of the Compose port mapping as well. For example, port `8001` requires `8001:8001`.
+
+`MUSICLOAD_DATA_DIR` remains a bootstrap setting because it tells Musicload where `settings.json` itself is stored. The provided Docker image sets it to `/data`.
+
+## Duplicate finder
+
+Open **Settings → Library maintenance** and select **Find duplicates**. Musicload then opens the Library tab with the result groups.
+
+The finder compares the meaningful words in song names. Capitalization, punctuation, accents, and common additions such as `official audio`, `lyrics`, `copy`, or a remaster year do not prevent a match. It does not compare file contents and does not automatically decide which copy should be kept.
+
+Possible matches may still be different releases, masters, or formats. Review the cover, title, artist, album, path, format, size, and duration, and play each file before deciding. Every deletion is manual and requires confirmation; Musicload never selects or deletes a file on your behalf.
 
 ## Install as an app
 
-Musicload is a Progressive Web App (PWA). For reliable installation and Android sharing, serve it through a trusted **HTTPS** address — for example with Nginx Proxy Manager, Caddy, Cloudflare Tunnel, or Tailscale.
+For reliable PWA installation and Android sharing, serve Musicload through a trusted HTTPS address, for example with Caddy, Nginx Proxy Manager, Cloudflare Tunnel, or Tailscale.
 
-### Android (Chrome)
+### Android
 
-1. Open your Musicload HTTPS address in Chrome.
-2. Open the three-dot menu.
-3. Choose **Install app** or **Add to Home screen**.
-4. Open Musicload from the new red Musicload icon.
+1. Open the HTTPS address in Chrome.
+2. Choose **Install app** or **Add to Home screen**.
+3. To find a recognized song, share the Google result with Musicload.
+4. Preview the matched audio track and download it.
 
-### iPhone and iPad (Safari)
+### iPhone and iPad
 
-1. Open your Musicload HTTPS address in Safari.
-2. Tap **Share**.
-3. Choose **Add to Home Screen**.
-4. Confirm **Add**. Musicload opens from its red home-screen icon like a normal app.
+1. Open the HTTPS address in Safari.
+2. Select **Share** and **Add to Home Screen**.
+3. Launch Musicload from its home-screen icon.
 
-## Environment options
+The PWA uses a network-first service worker and is not intended to work offline.
 
-### Navidrome login
+## Optional Navidrome login
 
-Set `NAVIDROME_URL` and a random `MUSICLOAD_SESSION_SECRET` of at least 32
-characters to require a Navidrome login for the complete web interface and API.
-Musicload verifies credentials through Navidrome and never stores the password.
-Sessions use a signed, HTTP-only cookie and expire after seven days.
+Open **Settings**, enter the Navidrome URL, generate a session secret, save, and restart Musicload. Musicload validates credentials through Navidrome and never stores the user's password.
 
-```yaml
-NAVIDROME_URL: http://navidrome:4533
-MUSICLOAD_SESSION_SECRET: replace-with-a-long-random-secret
-MUSICLOAD_SESSION_HTTPS_ONLY: "true"
+Sessions are signed, use HTTP-only cookies, and expire after seven days. Keep **HTTPS-only session cookie** enabled behind HTTPS. Disable it only for local HTTP testing.
+
+When Navidrome login is disabled, anyone who can reach Musicload is treated as an administrator. Do not expose an unauthenticated instance directly to the public internet.
+
+## Optional ListenBrainz Weekly Exploration
+
+Enable the ListenBrainz tab in **Settings** and restart Musicload. Each signed-in user can then:
+
+1. Save a ListenBrainz username.
+2. Preview up to 50 matched Weekly Exploration tracks.
+3. Download tracks individually or together.
+4. Optionally choose a weekday and local time for automatic downloads.
+
+Scheduled downloads use a separate per-account M3U playlist and run only when the matched recommendation set changes.
+
+## Cookies
+
+Open **Settings → Cookies** to upload a Netscape-format `cookies.txt`. Uploaded cookies are stored privately under `/data` and can be replaced or removed from the same dialog. They may help with content that requires a signed-in YouTube session.
+
+## Command line
+
+Search:
+
+```bash
+musicload search "Artist Track"
 ```
 
-Keep `MUSICLOAD_SESSION_HTTPS_ONLY` enabled when Musicload is served through
-HTTPS. Set it to `false` only when accessing Musicload directly over local HTTP.
+Download a search result, URL, or playlist:
 
-All settings live directly in `docker-compose.yml`; no `.env` file is required. The defaults in the included Compose file are already suitable for most installations.
+```bash
+musicload download --query "Artist Track"
+musicload download --url "https://music.youtube.com/watch?v=..."
+musicload download --url "https://www.deezer.com/playlist/..."
+```
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `MUSICLOAD_DOWNLOAD_DIR` | `/downloads` | Path inside the container that holds your music. |
-| `MUSICLOAD_DATA_DIR` | `~/.musicload` (`/data` in Docker) | State, cookies, logs, and caches. Kept separate from downloaded music. |
-| `NAVIDROME_URL` | unset | Navidrome server used as the login provider. |
-| `MUSICLOAD_SESSION_SECRET` | unset | Secret of at least 32 characters used to sign sessions. |
-| `MUSICLOAD_SESSION_HTTPS_ONLY` | `true` | Send the session cookie only over HTTPS. |
-| `MUSICLOAD_WEB_PORT` | `8000` | Web server port inside the container. |
-| `MUSICLOAD_AUDIO_FORMAT` | `opus` | `opus`, `mp3`, or `flac`. |
-| `MUSICLOAD_ORGANIZATION_MODE` | `flat` | Use `album` for `Artist/Album/Track` folders. |
-| `MUSICLOAD_FILENAME_TEMPLATE` | artist – title | Custom filename pattern for flat downloads. |
-| `MUSICLOAD_USE_PRIMARY_ARTIST` | `false` | Prefer the main artist over a complete artist list. |
-| `MUSICLOAD_ALLOW_UGC` | `false` | Allow user-generated YouTube uploads in results. |
-| `MUSICLOAD_WEB_PLAYLIST` | unset | Optional M3U playlist name for manual web downloads. |
-| `MUSICLOAD_MULTI_USER` | `false` | Prefix web playlists by remote user. |
-| `MUSICLOAD_LISTENBRAINZ_WEB` | `false` | Show the optional per-account ListenBrainz tab for manually exploring and downloading Weekly Exploration recommendations. |
+Explore charts and moods:
 
-When the ListenBrainz web tab is enabled, each signed-in user can save a separate
-ListenBrainz username and optionally enable a download check on a selected weekday and local time. Matched
-recommendations and Local Files metadata are persisted under `MUSICLOAD_DATA_DIR`, so
-they remain fast after container restarts. Automatic checks run inside the web container
-and only queue a playlist when its matched track set has changed.
-| `MUSICLOAD_CORS_ORIGINS` | `*` | Allowed browser origins, comma-separated. |
-| `MUSICLOAD_COOKIE_MODE` | `auto` | Cookie usage: `auto`, `always`, or `never`. |
-| `MUSICLOAD_COOKIE_RETRY_DELAY` | `1.0` | Wait time before a cookie retry, in seconds. |
-| `MUSICLOAD_LOG_COOKIE_USAGE` | `true` | Log whether cookies are used. |
-| `MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS` | `168` | How long unavailable tracks are remembered; `0` disables it. |
-| `MUSICLOAD_LYRICS_CACHE_HOURS` | `168` | Negative lyrics-cache lifetime; `0` never expires. |
-| `YT_DLP_COOKIE_FILE` | unset | Optional mounted `cookies.txt` path. |
-| `GOTIFY_URL` / `GOTIFY_TOKEN` | unset | Optional Gotify notifications. |
+```bash
+musicload explore charts --country DE
+musicload explore moods
+```
 
+Enrich an existing library with missing metadata, artwork, lyrics, and optional ReplayGain tags:
+
+```bash
+musicload tag --dry-run /path/to/music
+musicload tag /path/to/music
+```
+
+ReplayGain requires the external `rsgain` executable. Musicload reports its availability in Settings and skips ReplayGain safely when it is not installed.
+
+## Data and privacy
+
+Musicload stores settings, accounts, caches, logs, duplicate/download indexes, and uploaded cookies under `MUSICLOAD_DATA_DIR` (`/data` in Docker). Keep this directory persistent and private.
+
+Please download only media you are authorized to save and follow applicable laws and service terms.
 
 ## License
 
-Musicload is distributed under the [MIT License](LICENSE). Keep the copyright notice in copies and derivatives.
+Musicload is distributed under the [MIT License](LICENSE).
 
----
-
-<div align="center">
-  <p>If Musicload makes your music workflow easier, you can support the project:</p>
-  <a href="https://ko-fi.com/kingdaniel4747">
-    <img src="https://ko-fi.com/img/githubbutton_sm.svg" alt="Support Musicload on Ko-fi">
-  </a>
-</div>
+If Musicload improves your library workflow, you can [support the project on Ko-fi](https://ko-fi.com/kingdaniel4747).

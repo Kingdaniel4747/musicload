@@ -6,4 +6,4 @@ try:
     __version__ = version("musicload")
 except PackageNotFoundError:
     # Allows local source checks before the package is installed.
-    __version__ = "0.23.0"
+    __version__ = "0.24.0"

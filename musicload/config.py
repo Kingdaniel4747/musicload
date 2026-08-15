@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from musicload.settings import load_settings
+
 logger = logging.getLogger(__name__)
 
 # Default filename template: Artist - Title
@@ -66,16 +68,50 @@ class Config:
 
     @classmethod
     def from_env(cls) -> "Config":
-        """Create config from environment variables with defaults."""
+        """Create config from web overrides, environment variables, and defaults."""
+
+        # MUSICLOAD_DATA_DIR is the one bootstrap setting that cannot live in
+        # settings.json because it tells Musicload where that file is stored.
+        configured_data_dir = os.getenv("MUSICLOAD_DATA_DIR")
+        data_dir = (
+            Path(configured_data_dir).expanduser()
+            if configured_data_dir
+            else Path.home() / ".musicload"
+        )
+        data_dir.mkdir(parents=True, exist_ok=True)
+        web_settings = load_settings(data_dir)
+
+        def value(name: str, env_name: str, default=None):
+            if name in web_settings:
+                return web_settings[name]
+            return os.getenv(env_name, default)
+
+        def boolean(name: str, env_name: str, default: bool = False) -> bool:
+            raw = value(name, env_name, default)
+            if isinstance(raw, bool):
+                return raw
+            return str(raw).lower() in ("true", "1", "yes", "on")
+
+        def optional_text(name: str, env_name: str) -> str | None:
+            raw = value(name, env_name)
+            if raw is None:
+                return None
+            text = str(raw).strip()
+            return text or None
+
         # Parse CORS origins
-        cors_env = os.getenv("MUSICLOAD_CORS_ORIGINS", "*")
-        if cors_env == "*":
+        cors_value = value("cors_origins", "MUSICLOAD_CORS_ORIGINS", "*")
+        if isinstance(cors_value, list):
+            cors_origins = [str(origin).strip() for origin in cors_value if str(origin).strip()]
+        elif str(cors_value).strip() == "*":
             cors_origins = ["*"]
         else:
-            cors_origins = [origin.strip() for origin in cors_env.split(",")]
+            cors_origins = [origin.strip() for origin in str(cors_value).split(",") if origin.strip()]
+        if not cors_origins:
+            cors_origins = ["*"]
 
         # Parse and validate cookie mode
-        cookie_mode = os.getenv("MUSICLOAD_COOKIE_MODE", "auto").lower()
+        cookie_mode = str(value("cookie_mode", "MUSICLOAD_COOKIE_MODE", "auto")).lower()
         if cookie_mode not in ("auto", "always", "never"):
             logger.warning(
                 "Invalid MUSICLOAD_COOKIE_MODE '%s', falling back to 'auto'",
@@ -84,21 +120,19 @@ class Config:
             cookie_mode = "auto"
 
         # Parse cookie retry delay
-        cookie_retry_delay = float(os.getenv("MUSICLOAD_COOKIE_RETRY_DELAY", "1.0"))
+        cookie_retry_delay = float(value("cookie_retry_delay", "MUSICLOAD_COOKIE_RETRY_DELAY", 1.0))
         if cookie_retry_delay < 0:
             raise ValueError(
                 f"MUSICLOAD_COOKIE_RETRY_DELAY must be non-negative, got {cookie_retry_delay}"
             )
 
         # Parse log cookie usage flag
-        log_cookie_usage = os.getenv("MUSICLOAD_LOG_COOKIE_USAGE", "true").lower() in (
-            "true",
-            "1",
-            "yes",
-        )
+        log_cookie_usage = boolean("log_cookie_usage", "MUSICLOAD_LOG_COOKIE_USAGE", True)
 
         # Parse unavailable cooldown hours (0 = disabled)
-        unavailable_cooldown_hours = int(os.getenv("MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS", "168"))
+        unavailable_cooldown_hours = int(
+            value("unavailable_cooldown_hours", "MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS", 168)
+        )
         if unavailable_cooldown_hours < 0:
             logger.warning(
                 "MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS is negative (%d), using 0 (disabled)",
@@ -107,7 +141,9 @@ class Config:
             unavailable_cooldown_hours = 0
 
         # Parse lyrics cache TTL hours (0 = negatives never expire)
-        lyrics_cache_hours = int(os.getenv("MUSICLOAD_LYRICS_CACHE_HOURS", "168"))
+        lyrics_cache_hours = int(
+            value("lyrics_cache_hours", "MUSICLOAD_LYRICS_CACHE_HOURS", 168)
+        )
         if lyrics_cache_hours < 0:
             logger.warning(
                 "MUSICLOAD_LYRICS_CACHE_HOURS is negative (%d), using 0 (no expiry)",
@@ -116,44 +152,40 @@ class Config:
             lyrics_cache_hours = 0
 
         # Parse multi-user mode flag
-        multi_user = os.getenv("MUSICLOAD_MULTI_USER", "false").lower() in ("true", "1", "yes")
+        multi_user = boolean("multi_user", "MUSICLOAD_MULTI_USER")
 
         # Parse replaygain flag
-        replaygain = os.getenv("MUSICLOAD_REPLAYGAIN", "false").lower() in ("true", "1", "yes")
+        replaygain = boolean("replaygain", "MUSICLOAD_REPLAYGAIN")
 
         # Parse allow_ugc flag
-        allow_ugc = os.getenv("MUSICLOAD_ALLOW_UGC", "false").lower() in ("true", "1", "yes")
+        allow_ugc = boolean("allow_ugc", "MUSICLOAD_ALLOW_UGC")
 
         # Parse web port
-        web_port = int(os.getenv("MUSICLOAD_WEB_PORT", "8000"))
+        web_port = int(value("web_port", "MUSICLOAD_WEB_PORT", 8000))
         if not (1 <= web_port <= 65535):
             raise ValueError(
                 f"MUSICLOAD_WEB_PORT must be between 1 and 65535, got {web_port}"
             )
 
-        download_dir = Path(os.getenv("MUSICLOAD_DOWNLOAD_DIR", "./downloads"))
-
-        # Application data is intentionally independent from downloaded music.
-        # Docker sets this to /data; native installations default to ~/.musicload.
-        configured_data_dir = os.getenv("MUSICLOAD_DATA_DIR")
-        data_dir = (
-            Path(configured_data_dir).expanduser()
-            if configured_data_dir
-            else Path.home() / ".musicload"
-        )
-        data_dir.mkdir(parents=True, exist_ok=True)
+        download_dir = Path(str(value("download_dir", "MUSICLOAD_DOWNLOAD_DIR", "./downloads"))).expanduser()
 
         return cls(
             download_dir=download_dir,
             data_dir=data_dir,
-            audio_format=os.getenv("MUSICLOAD_AUDIO_FORMAT", "opus"),
-            filename_template=os.getenv("MUSICLOAD_FILENAME_TEMPLATE", DEFAULT_FILENAME_TEMPLATE),
-            organization_mode=os.getenv("MUSICLOAD_ORGANIZATION_MODE", "flat"),
-            use_primary_artist=os.getenv("MUSICLOAD_USE_PRIMARY_ARTIST", "false").lower() in ("true", "1", "yes"),
+            audio_format=str(value("audio_format", "MUSICLOAD_AUDIO_FORMAT", "opus")),
+            filename_template=str(
+                value("filename_template", "MUSICLOAD_FILENAME_TEMPLATE", DEFAULT_FILENAME_TEMPLATE)
+            ),
+            organization_mode=str(
+                value("organization_mode", "MUSICLOAD_ORGANIZATION_MODE", "album")
+            ),
+            use_primary_artist=boolean(
+                "use_primary_artist", "MUSICLOAD_USE_PRIMARY_ARTIST"
+            ),
             web_port=web_port,
-            web_playlist_name=os.getenv("MUSICLOAD_WEB_PLAYLIST"),
-            gotify_url=os.getenv("GOTIFY_URL"),
-            gotify_token=os.getenv("GOTIFY_TOKEN"),
+            web_playlist_name=optional_text("web_playlist_name", "MUSICLOAD_WEB_PLAYLIST"),
+            gotify_url=optional_text("gotify_url", "GOTIFY_URL"),
+            gotify_token=optional_text("gotify_token", "GOTIFY_TOKEN"),
             yt_dlp_cookie_file=os.getenv("YT_DLP_COOKIE_FILE"),
             cookie_mode=cookie_mode,
             cookie_retry_delay=cookie_retry_delay,
@@ -164,14 +196,14 @@ class Config:
             multi_user=multi_user,
             replaygain=replaygain,
             allow_ugc=allow_ugc,
-            navidrome_url=os.getenv("NAVIDROME_URL", "").rstrip("/") or None,
-            session_secret=os.getenv("MUSICLOAD_SESSION_SECRET"),
-            session_https_only=os.getenv(
-                "MUSICLOAD_SESSION_HTTPS_ONLY", "true"
-            ).lower() in ("true", "1", "yes"),
-            listenbrainz_web=os.getenv(
-                "MUSICLOAD_LISTENBRAINZ_WEB", "false"
-            ).lower() in ("true", "1", "yes"),
+            navidrome_url=(optional_text("navidrome_url", "NAVIDROME_URL") or "").rstrip("/") or None,
+            session_secret=optional_text("session_secret", "MUSICLOAD_SESSION_SECRET"),
+            session_https_only=boolean(
+                "session_https_only", "MUSICLOAD_SESSION_HTTPS_ONLY", True
+            ),
+            listenbrainz_web=boolean(
+                "listenbrainz_web", "MUSICLOAD_LISTENBRAINZ_WEB"
+            ),
         )
 
     @property
