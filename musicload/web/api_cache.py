@@ -45,6 +45,10 @@ class TtlCache:
 
         self._cache[key] = (value, time.monotonic())
 
+    def discard(self, key: str) -> None:
+        """Remove a cached value if it exists."""
+        self._cache.pop(key, None)
+
     def cached_call(self, key: str, fn: Callable[[], T]) -> T:
         """Return cached result for key, or call fn(), cache it, and return it."""
         result = self.get(key)

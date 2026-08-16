@@ -898,12 +898,17 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]
     return stream_url, is_hls, http_headers
 
 
-async def _resolve_audio_stream(video_id: str) -> tuple[str, bool, dict[str, str]]:
+async def _resolve_audio_stream(
+    video_id: str, *, refresh: bool = False
+) -> tuple[str, bool, dict[str, str]]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    cached = _stream_url_cache.get(video_id)
-    if cached is not None:
-        return cached
+    if refresh:
+        _stream_url_cache.discard(video_id)
+    else:
+        cached = _stream_url_cache.get(video_id)
+        if cached is not None:
+            return cached
     try:
         resolved = await asyncio.to_thread(_resolve_audio_stream_sync, video_id)
     except Exception as error:
@@ -931,28 +936,80 @@ async def preview_audio(video_id: str):
     Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
     converts it to MP3 that browsers can play progressively.
     """
-    stream_url, _, http_headers = await _resolve_audio_stream(video_id)
-
-    cmd = _preview_ffmpeg_command(stream_url, http_headers)
-
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+    process, first_chunk = await _prepare_preview_process(video_id)
 
     async def stream_audio():
         try:
+            yield first_chunk
             while True:
                 chunk = await process.stdout.read(8192)
                 if not chunk:
                     break
                 yield chunk
+            await process.wait()
+            if process.returncode:
+                error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
+                logger.warning(
+                    "Audio preview ended early for %s (ffmpeg=%s): %s",
+                    video_id,
+                    process.returncode,
+                    error[-500:] or "no ffmpeg error output",
+                )
         finally:
-            if process.returncode is None:
-                process.kill()
+            await _terminate_preview_process(process)
 
-    return StreamingResponse(stream_audio(), media_type="audio/mpeg")
+    return StreamingResponse(
+        stream_audio(),
+        media_type="audio/mpeg",
+        headers={"Cache-Control": "no-store", "Accept-Ranges": "none"},
+    )
+
+
+async def _prepare_preview_process(
+    video_id: str,
+) -> tuple[asyncio.subprocess.Process, bytes]:
+    """Start ffmpeg and verify that it produces audio before returning HTTP 200."""
+    last_error = "no audio data"
+    for attempt in range(2):
+        stream_url, _, http_headers = await _resolve_audio_stream(
+            video_id, refresh=attempt > 0
+        )
+        process = await asyncio.create_subprocess_exec(
+            *_preview_ffmpeg_command(stream_url, http_headers),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            first_chunk = await asyncio.wait_for(process.stdout.read(8192), timeout=20)
+        except TimeoutError:
+            last_error = "ffmpeg produced no audio within 20 seconds"
+            await _terminate_preview_process(process)
+        else:
+            if first_chunk:
+                return process, first_chunk
+            await process.wait()
+            error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
+            last_error = error[-500:] or f"ffmpeg exited with code {process.returncode}"
+
+        logger.warning(
+            "Audio preview attempt %d failed for %s: %s",
+            attempt + 1,
+            video_id,
+            last_error,
+        )
+
+    raise HTTPException(status_code=502, detail="Audio preview is unavailable")
+
+
+async def _terminate_preview_process(process: asyncio.subprocess.Process) -> None:
+    """Stop ffmpeg on disconnect and always reap the child process."""
+    if process.returncode is not None:
+        return
+    process.kill()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=5)
+    except TimeoutError:
+        logger.warning("Timed out while stopping audio preview process")
 
 
 def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> list[str]:
@@ -964,6 +1021,9 @@ def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> li
         )
         cmd.extend(['-headers', ffmpeg_headers])
     cmd.extend([
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '5',
         '-i', stream_url,
         '-vn',
         '-f', 'mp3',
