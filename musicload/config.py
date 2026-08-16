@@ -18,6 +18,51 @@ DEFAULT_FILENAME_TEMPLATE = "%(artist,uploader)s - %(title)s"
 MAX_FILENAME_BYTES = 200
 
 
+class _SettingValues:
+    """Read settings.json values before environment variables and defaults."""
+
+    def __init__(self, web_settings: dict):
+        self.web_settings = web_settings
+
+    def get(self, name: str, env_name: str, default=None):
+        if name in self.web_settings:
+            return self.web_settings[name]
+        return os.getenv(env_name, default)
+
+    def boolean(self, name: str, env_name: str, default: bool = False) -> bool:
+        raw = self.get(name, env_name, default)
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).lower() in ("true", "1", "yes", "on")
+
+    def optional_text(self, name: str, env_name: str) -> str | None:
+        raw = self.get(name, env_name)
+        if raw is None:
+            return None
+        return str(raw).strip() or None
+
+
+def _parse_cors_origins(raw: object) -> list[str]:
+    if isinstance(raw, list):
+        origins = [str(origin).strip() for origin in raw if str(origin).strip()]
+    elif str(raw).strip() == "*":
+        origins = ["*"]
+    else:
+        origins = [origin.strip() for origin in str(raw).split(",") if origin.strip()]
+    return origins or ["*"]
+
+
+def _parse_cookie_mode(raw: object) -> str:
+    mode = str(raw).lower()
+    if mode in ("auto", "always", "never"):
+        return mode
+    logger.warning(
+        "Invalid MUSICLOAD_COOKIE_MODE '%s', falling back to 'auto'",
+        mode,
+    )
+    return "auto"
+
+
 @dataclass
 class Config:
     """Application configuration."""
@@ -79,59 +124,39 @@ class Config:
             else Path.home() / ".musicload"
         )
         data_dir.mkdir(parents=True, exist_ok=True)
-        web_settings = load_settings(data_dir)
-
-        def value(name: str, env_name: str, default=None):
-            if name in web_settings:
-                return web_settings[name]
-            return os.getenv(env_name, default)
-
-        def boolean(name: str, env_name: str, default: bool = False) -> bool:
-            raw = value(name, env_name, default)
-            if isinstance(raw, bool):
-                return raw
-            return str(raw).lower() in ("true", "1", "yes", "on")
-
-        def optional_text(name: str, env_name: str) -> str | None:
-            raw = value(name, env_name)
-            if raw is None:
-                return None
-            text = str(raw).strip()
-            return text or None
+        values = _SettingValues(load_settings(data_dir))
 
         # Parse CORS origins
-        cors_value = value("cors_origins", "MUSICLOAD_CORS_ORIGINS", "*")
-        if isinstance(cors_value, list):
-            cors_origins = [str(origin).strip() for origin in cors_value if str(origin).strip()]
-        elif str(cors_value).strip() == "*":
-            cors_origins = ["*"]
-        else:
-            cors_origins = [origin.strip() for origin in str(cors_value).split(",") if origin.strip()]
-        if not cors_origins:
-            cors_origins = ["*"]
+        cors_origins = _parse_cors_origins(
+            values.get("cors_origins", "MUSICLOAD_CORS_ORIGINS", "*")
+        )
 
         # Parse and validate cookie mode
-        cookie_mode = str(value("cookie_mode", "MUSICLOAD_COOKIE_MODE", "auto")).lower()
-        if cookie_mode not in ("auto", "always", "never"):
-            logger.warning(
-                "Invalid MUSICLOAD_COOKIE_MODE '%s', falling back to 'auto'",
-                cookie_mode
-            )
-            cookie_mode = "auto"
+        cookie_mode = _parse_cookie_mode(
+            values.get("cookie_mode", "MUSICLOAD_COOKIE_MODE", "auto")
+        )
 
         # Parse cookie retry delay
-        cookie_retry_delay = float(value("cookie_retry_delay", "MUSICLOAD_COOKIE_RETRY_DELAY", 1.0))
+        cookie_retry_delay = float(
+            values.get("cookie_retry_delay", "MUSICLOAD_COOKIE_RETRY_DELAY", 1.0)
+        )
         if cookie_retry_delay < 0:
             raise ValueError(
                 f"MUSICLOAD_COOKIE_RETRY_DELAY must be non-negative, got {cookie_retry_delay}"
             )
 
         # Parse log cookie usage flag
-        log_cookie_usage = boolean("log_cookie_usage", "MUSICLOAD_LOG_COOKIE_USAGE", True)
+        log_cookie_usage = values.boolean(
+            "log_cookie_usage", "MUSICLOAD_LOG_COOKIE_USAGE", True
+        )
 
         # Parse unavailable cooldown hours (0 = disabled)
         unavailable_cooldown_hours = int(
-            value("unavailable_cooldown_hours", "MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS", 168)
+            values.get(
+                "unavailable_cooldown_hours",
+                "MUSICLOAD_UNAVAILABLE_COOLDOWN_HOURS",
+                168,
+            )
         )
         if unavailable_cooldown_hours < 0:
             logger.warning(
@@ -142,7 +167,7 @@ class Config:
 
         # Parse lyrics cache TTL hours (0 = negatives never expire)
         lyrics_cache_hours = int(
-            value("lyrics_cache_hours", "MUSICLOAD_LYRICS_CACHE_HOURS", 168)
+            values.get("lyrics_cache_hours", "MUSICLOAD_LYRICS_CACHE_HOURS", 168)
         )
         if lyrics_cache_hours < 0:
             logger.warning(
@@ -152,40 +177,52 @@ class Config:
             lyrics_cache_hours = 0
 
         # Parse multi-user mode flag
-        multi_user = boolean("multi_user", "MUSICLOAD_MULTI_USER")
+        multi_user = values.boolean("multi_user", "MUSICLOAD_MULTI_USER")
 
         # Parse replaygain flag
-        replaygain = boolean("replaygain", "MUSICLOAD_REPLAYGAIN")
+        replaygain = values.boolean("replaygain", "MUSICLOAD_REPLAYGAIN")
 
         # Parse allow_ugc flag
-        allow_ugc = boolean("allow_ugc", "MUSICLOAD_ALLOW_UGC")
+        allow_ugc = values.boolean("allow_ugc", "MUSICLOAD_ALLOW_UGC")
 
         # Parse web port
-        web_port = int(value("web_port", "MUSICLOAD_WEB_PORT", 8000))
+        web_port = int(values.get("web_port", "MUSICLOAD_WEB_PORT", 8000))
         if not (1 <= web_port <= 65535):
             raise ValueError(
                 f"MUSICLOAD_WEB_PORT must be between 1 and 65535, got {web_port}"
             )
 
-        download_dir = Path(str(value("download_dir", "MUSICLOAD_DOWNLOAD_DIR", "./downloads"))).expanduser()
+        download_dir = Path(
+            str(values.get("download_dir", "MUSICLOAD_DOWNLOAD_DIR", "./downloads"))
+        ).expanduser()
 
         return cls(
             download_dir=download_dir,
             data_dir=data_dir,
-            audio_format=str(value("audio_format", "MUSICLOAD_AUDIO_FORMAT", "opus")),
+            audio_format=str(
+                values.get("audio_format", "MUSICLOAD_AUDIO_FORMAT", "opus")
+            ),
             filename_template=str(
-                value("filename_template", "MUSICLOAD_FILENAME_TEMPLATE", DEFAULT_FILENAME_TEMPLATE)
+                values.get(
+                    "filename_template",
+                    "MUSICLOAD_FILENAME_TEMPLATE",
+                    DEFAULT_FILENAME_TEMPLATE,
+                )
             ),
             organization_mode=str(
-                value("organization_mode", "MUSICLOAD_ORGANIZATION_MODE", "album")
+                values.get(
+                    "organization_mode", "MUSICLOAD_ORGANIZATION_MODE", "album"
+                )
             ),
-            use_primary_artist=boolean(
+            use_primary_artist=values.boolean(
                 "use_primary_artist", "MUSICLOAD_USE_PRIMARY_ARTIST"
             ),
             web_port=web_port,
-            web_playlist_name=optional_text("web_playlist_name", "MUSICLOAD_WEB_PLAYLIST"),
-            gotify_url=optional_text("gotify_url", "GOTIFY_URL"),
-            gotify_token=optional_text("gotify_token", "GOTIFY_TOKEN"),
+            web_playlist_name=values.optional_text(
+                "web_playlist_name", "MUSICLOAD_WEB_PLAYLIST"
+            ),
+            gotify_url=values.optional_text("gotify_url", "GOTIFY_URL"),
+            gotify_token=values.optional_text("gotify_token", "GOTIFY_TOKEN"),
             yt_dlp_cookie_file=os.getenv("YT_DLP_COOKIE_FILE"),
             cookie_mode=cookie_mode,
             cookie_retry_delay=cookie_retry_delay,
@@ -196,12 +233,17 @@ class Config:
             multi_user=multi_user,
             replaygain=replaygain,
             allow_ugc=allow_ugc,
-            navidrome_url=(optional_text("navidrome_url", "NAVIDROME_URL") or "").rstrip("/") or None,
-            session_secret=optional_text("session_secret", "MUSICLOAD_SESSION_SECRET"),
-            session_https_only=boolean(
+            navidrome_url=(
+                values.optional_text("navidrome_url", "NAVIDROME_URL") or ""
+            ).rstrip("/")
+            or None,
+            session_secret=values.optional_text(
+                "session_secret", "MUSICLOAD_SESSION_SECRET"
+            ),
+            session_https_only=values.boolean(
                 "session_https_only", "MUSICLOAD_SESSION_HTTPS_ONLY", True
             ),
-            listenbrainz_web=boolean(
+            listenbrainz_web=values.boolean(
                 "listenbrainz_web", "MUSICLOAD_LISTENBRAINZ_WEB"
             ),
         )

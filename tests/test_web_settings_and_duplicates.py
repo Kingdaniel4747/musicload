@@ -9,7 +9,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 _TEMP_ROOT = tempfile.TemporaryDirectory()
 _ROOT = Path(_TEMP_ROOT.name)
 os.environ["MUSICLOAD_DATA_DIR"] = str(_ROOT / "data")
@@ -18,7 +17,11 @@ os.environ["MUSICLOAD_DOWNLOAD_DIR"] = str(_ROOT / "music")
 from fastapi.testclient import TestClient
 
 from musicload.config import get_config
-from musicload.web.app import _find_library_duplicates_sync, _preview_ffmpeg_command, app
+from musicload.web.app import (
+    _find_library_duplicates_sync,
+    _preview_ffmpeg_command,
+    app,
+)
 
 
 class WebSettingsTests(unittest.TestCase):
@@ -61,14 +64,30 @@ class WebSettingsTests(unittest.TestCase):
     def test_play_buttons_are_bound_once_and_active_listenbrainz_is_not_reloaded(self) -> None:
         with TestClient(app) as client:
             response = client.get("/")
+            script_responses = [
+                client.get(f"/static/app-{section}.js")
+                for section in (
+                    "core",
+                    "search",
+                    "downloads",
+                    "settings",
+                    "explore",
+                    "library",
+                    "init",
+                )
+            ]
 
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertIn('button.dataset.playbackBound = "true"', response.text)
-        self.assertNotIn('exploreResults.querySelectorAll(".play-btn")', response.text)
-        self.assertNotIn('document.querySelectorAll(".play-btn")', response.text)
-        self.assertIn('if (currentTab === "listenbrainz") return;', response.text)
-        self.assertIn('audio.src = `/api/preview/${videoId}`;', response.text)
-        self.assertNotIn('fetch(`/api/stream-url/${videoId}`)', response.text)
+        self.assertIn('src="/static/app-core.js"', response.text)
+        for script in script_responses:
+            self.assertEqual(script.status_code, 200, script.text)
+        scripts = "\n".join(script.text for script in script_responses)
+        self.assertIn('button.dataset.playbackBound = "true"', scripts)
+        self.assertNotIn('exploreResults.querySelectorAll(".play-btn")', scripts)
+        self.assertNotIn('document.querySelectorAll(".play-btn")', scripts)
+        self.assertIn('if (currentTab === "listenbrainz") return;', scripts)
+        self.assertIn('audio.src = `/api/preview/${videoId}`;', scripts)
+        self.assertNotIn('fetch(`/api/stream-url/${videoId}`)', scripts)
 
     def test_settings_can_be_saved_and_reset(self) -> None:
         with TestClient(app) as client:

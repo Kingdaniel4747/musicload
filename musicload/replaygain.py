@@ -46,6 +46,7 @@ def apply_replaygain(audio_path: Path, audio_format: str) -> bool:
 
     cmd.append(str(audio_path))
 
+    successful = False
     try:
         result = subprocess.run(
             cmd,
@@ -60,10 +61,9 @@ def apply_replaygain(audio_path: Path, audio_format: str) -> bool:
                 audio_path.name,
                 result.stderr.strip(),
             )
-            return False
-
-        logger.info("ReplayGain tags applied: %s", audio_path.name)
-        return True
+        else:
+            logger.info("ReplayGain tags applied: %s", audio_path.name)
+            successful = True
 
     except subprocess.TimeoutExpired:
         logger.warning("ReplayGain timed out for %s", audio_path.name)
@@ -73,4 +73,4 @@ def apply_replaygain(audio_path: Path, audio_format: str) -> bool:
         return False
     except Exception as e:
         logger.warning("ReplayGain error for %s: %s", audio_path.name, e)
-        return False
+    return successful
