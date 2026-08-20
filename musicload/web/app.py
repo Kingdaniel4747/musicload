@@ -966,6 +966,10 @@ def _resolve_audio_stream_sync(
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        # Google signs media URLs for the public IP used during extraction.
+        # Containers with IPv6 privacy addresses can otherwise resolve the URL
+        # over one address and proxy it over another, which produces HTTP 403.
+        "source_address": "0.0.0.0",
     }
     info = extract_info_with_retry(
         ydl_opts=ydl_opts,
@@ -1177,9 +1181,15 @@ async def _prepare_preview_proxy(
             if range_header:
                 request_headers["Range"] = range_header.strip()
 
+            transport = httpx.AsyncHTTPTransport(
+                local_address="0.0.0.0",
+                retries=1,
+            )
             client = httpx.AsyncClient(
                 follow_redirects=True,
                 timeout=httpx.Timeout(30.0, connect=15.0),
+                transport=transport,
+                trust_env=False,
             )
             upstream_request = client.build_request(
                 "GET", stream_url, headers=request_headers
