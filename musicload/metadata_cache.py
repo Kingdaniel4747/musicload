@@ -55,13 +55,6 @@ class CachedLyrics(BaseModel):
     cached_at: float  # time.time() for TTL check on negatives
 
 
-def _lyrics_cache_is_valid(cached: CachedLyrics, negative_ttl_hours: int) -> bool:
-    if cached.lyrics is not None or negative_ttl_hours <= 0:
-        return True
-    age_hours = (time.time() - cached.cached_at) / 3600
-    return age_hours < negative_ttl_hours
-
-
 _SCHEMA_STATEMENTS = [
     "CREATE TABLE IF NOT EXISTS song_metadata (video_id TEXT PRIMARY KEY, data TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS track (video_id TEXT PRIMARY KEY, data TEXT NOT NULL)",
@@ -203,13 +196,23 @@ class MetadataCache:
             if row is None:
                 return None
             cached = CachedLyrics.model_validate_json(row[0])
-            if _lyrics_cache_is_valid(cached, negative_ttl_hours):
+            # Positive results never expire
+            if cached.lyrics is not None:
                 return cached
+            # Negative results expire after TTL
+            if negative_ttl_hours <= 0:
+                # TTL disabled — negatives never expire
+                return cached
+            age_hours = (time.time() - cached.cached_at) / 3600
+            if age_hours < negative_ttl_hours:
+                return cached
+            # Expired negative — delete and return None
             self._conn.execute("DELETE FROM lyrics WHERE video_id = ?", (video_id,))
             self._conn.commit()
+            return None
         except Exception:
             logger.debug("Cache read error for lyrics/%s", video_id, exc_info=True)
-        return None
+            return None
 
     def add_lyrics(self, entry: CachedLyrics) -> None:
         """Store lyrics result (INSERT OR REPLACE)."""

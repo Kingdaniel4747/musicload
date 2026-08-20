@@ -15,12 +15,11 @@ import logging
 import re
 import threading
 import time
-from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
+from typing import Any, Optional
 
 import yt_dlp
 from yt_dlp.utils import DownloadError, ExtractorError
-
 try:
     from yt_dlp.version import __version__ as YT_DLP_VERSION
 except Exception:  # pragma: no cover - defensive import
@@ -261,39 +260,6 @@ def _retry_ambiguous_youtube_unavailable(
     raise last_error
 
 
-def _extract_auto_mode(
-    ydl_opts: dict[str, Any],
-    url: str,
-    download: bool,
-    cookie_file: Optional[str],
-    retry_delay: float,
-    log_cookie_usage: bool,
-) -> dict[str, Any]:
-    if log_cookie_usage:
-        logger.debug("Cookie mode=auto: Trying without cookies first")
-    try:
-        return _execute_ydl(
-            ydl_opts, url, download, cookie_file, use_cookies=False
-        )
-    except (ExtractorError, DownloadError) as error:
-        if not is_auth_error(error):
-            raise
-        if not cookie_file:
-            logger.warning(
-                "Auth error detected but no cookie file available: %s",
-                str(error)[:100],
-            )
-            raise
-        if log_cookie_usage:
-            logger.info("Cookie fallback for: %s", url)
-            logger.debug("Retrying with cookies after %.1fs delay", retry_delay)
-        CookieUsageStats.increment_cookie_fallback()
-        time.sleep(retry_delay)
-        return _execute_ydl(
-            ydl_opts, url, download, cookie_file, use_cookies=True
-        )
-
-
 def extract_info_with_retry(
     ydl_opts: dict[str, Any],
     url: str,
@@ -348,14 +314,38 @@ def extract_info_with_retry(
             logger.debug("Cookie mode=never: Never using cookies")
         return _execute_ydl(ydl_opts, url, download, cookie_file, use_cookies=False)
 
-    return _extract_auto_mode(
-        ydl_opts,
-        url,
-        download,
-        cookie_file,
-        retry_delay,
-        log_cookie_usage,
-    )
+    # Mode: auto - try without cookies first, fallback on auth errors
+    if log_cookie_usage:
+        logger.debug("Cookie mode=auto: Trying without cookies first")
+
+    try:
+        # First attempt: no cookies
+        return _execute_ydl(ydl_opts, url, download, cookie_file, use_cookies=False)
+
+    except (ExtractorError, DownloadError) as e:
+        # Check if this is an auth error that cookies might fix
+        if not is_auth_error(e):
+            # Not an auth error, re-raise
+            raise
+
+        # Auth error detected - retry with cookies
+        if not cookie_file:
+            logger.warning(
+                "Auth error detected but no cookie file available: %s", str(e)[:100]
+            )
+            raise
+
+        if log_cookie_usage:
+            logger.info("Cookie fallback for: %s", url)
+            logger.debug("Retrying with cookies after %.1fs delay", retry_delay)
+
+        CookieUsageStats.increment_cookie_fallback()
+
+        # Wait before retrying
+        time.sleep(retry_delay)
+
+        # Retry with cookies
+        return _execute_ydl(ydl_opts, url, download, cookie_file, use_cookies=True)
 
 
 def _execute_ydl(

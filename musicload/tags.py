@@ -42,19 +42,19 @@ def write_multi_artist_tags(
         return False
 
     suffix = file_path.suffix.lower()
-    writers = {
-        ".flac": _write_flac_tags,
-        ".opus": _write_opus_tags,
-        ".ogg": _write_ogg_tags,
-        ".mp3": _write_mp3_tags,
-    }
-    writer = writers.get(suffix)
-    if writer is None:
-        logger.debug("Unsupported format for multi-artist tags: %s", suffix)
-        return True
 
     try:
-        return writer(file_path, artists, album_artists)
+        if suffix == ".flac":
+            return _write_flac_tags(file_path, artists, album_artists)
+        elif suffix == ".opus":
+            return _write_opus_tags(file_path, artists, album_artists)
+        elif suffix == ".ogg":
+            return _write_ogg_tags(file_path, artists, album_artists)
+        elif suffix == ".mp3":
+            return _write_mp3_tags(file_path, artists, album_artists)
+        else:
+            logger.debug("Unsupported format for multi-artist tags: %s", suffix)
+            return True  # Not an error, just unsupported
     except Exception as e:
         logger.warning("Failed to write multi-artist tags to %s: %s", file_path.name, e)
         return False

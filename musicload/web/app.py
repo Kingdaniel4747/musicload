@@ -6,13 +6,9 @@ import json
 import logging
 import mimetypes
 import re
-import secrets
-import tempfile
-import time
 import urllib.parse
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Awaitable, Callable
 
 import httpx
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
@@ -20,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 from starlette.responses import JSONResponse, RedirectResponse
 
 from musicload import __version__
@@ -28,32 +25,7 @@ from musicload.playlist import add_to_m3u, read_m3u, remove_from_m3u
 from musicload.queue import QueueManager
 from musicload.search import search
 from musicload.web.api_cache import TtlCache
-from musicload.web.artwork import embedded_artwork, folder_artwork
 from musicload.web.image_proxy import ImageProxyService, validate_image_url
-from musicload.web.responses import sse_event as _sse_event
-from musicload.web.routes.explore import router as explore_router
-from musicload.web.routes.search import router as search_router
-from musicload.web.schemas import (
-    AppSettingsRequest,
-    DownloadRequest,
-    DownloadResponse,
-    LibraryTrackResponse,
-    LibraryTracksResponse,
-    ListenBrainzSettingsRequest,
-    LoginRequest,
-    QueueAddAlbumRequest,
-    QueueAddRequest,
-    QueueAddResponse,
-)
-from musicload.web.schemas import (
-    track_to_response as _track_to_response,
-)
-from musicload.web.settings_service import (
-    build_settings_values,
-)
-from musicload.web.settings_service import (
-    settings_response as _settings_response,
-)
 
 app = FastAPI(title="Musicload", description="Search and download music from YouTube Music")
 logger = logging.getLogger(__name__)
@@ -76,12 +48,16 @@ _library_metadata_cache: dict[str, tuple[float, int, dict]] = {}
 # Global image proxy service
 _image_proxy: ImageProxyService | None = None
 
-# Playback diagnostics are kept only in memory for ten minutes.
-_preview_diagnostics = TtlCache(max_entries=200, ttl_seconds=600)  # 10 min
-_playback_temp_handle = tempfile.TemporaryDirectory(prefix="musicload-playback-")
-_playback_temp_dir = Path(_playback_temp_handle.name)
-_playback_sessions: dict[str, "_PlaybackSession"] = {}
-_playback_download_slots = asyncio.Semaphore(3)
+# API response caches (TTL in seconds)
+_search_cache = TtlCache(max_entries=100, ttl_seconds=300)        # 5 min
+_album_search_cache = TtlCache(max_entries=100, ttl_seconds=300)  # 5 min
+_album_tracks_cache = TtlCache(max_entries=50, ttl_seconds=900)   # 15 min
+_moods_cache = TtlCache(max_entries=1, ttl_seconds=3600)          # 1 hour
+_mood_playlists_cache = TtlCache(max_entries=25, ttl_seconds=1800)  # 30 min
+_charts_cache = TtlCache(max_entries=10, ttl_seconds=1800)        # 30 min
+_playlist_tracks_cache = TtlCache(max_entries=25, ttl_seconds=900)  # 15 min
+_new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
+_stream_url_cache = TtlCache(max_entries=50, ttl_seconds=300)      # 5 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -220,16 +196,13 @@ def _get_remote_user(http_request: Request, config) -> str | None:
 async def startup_event():
     """Initialize queue manager and image proxy on startup."""
     global queue_manager, _image_proxy
-    queue_manager = QueueManager(
-        history_path=config.data_dir / "download-history.json"
-    )
+    queue_manager = QueueManager()
     await queue_manager.start()
     _image_proxy = ImageProxyService()
     for coroutine in (
         _warm_library_cache(),
         _warm_listenbrainz_caches(),
         _listenbrainz_scheduler(),
-        _playback_session_reaper(),
     ):
         task = asyncio.create_task(coroutine)
         _background_tasks.add(task)
@@ -247,7 +220,207 @@ async def shutdown_event():
         task.cancel()
     if _background_tasks:
         await asyncio.gather(*_background_tasks, return_exceptions=True)
-    _delete_all_playback_sessions()
+
+
+class DownloadRequest(BaseModel):
+    """Request body for download endpoint."""
+
+    video_id: str
+    title: str
+    artist: str
+    artists: list[str] | None = None
+    audio_format: str = "opus"
+
+
+class LoginRequest(BaseModel):
+    """Navidrome credentials used only for the current login attempt."""
+
+    username: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=1, max_length=1024)
+
+
+class ListenBrainzSettingsRequest(BaseModel):
+    """ListenBrainz identity belonging to the current Musicload account."""
+
+    username: str = Field(min_length=1, max_length=128)
+    auto_download: bool = False
+    download_weekday: int = Field(default=0, ge=0, le=6)
+    download_time: str = Field(default="03:00", pattern=r"^(?:[01]\d|2[0-3]):[0-5]\d$")
+    timezone: str = Field(default="UTC", min_length=1, max_length=64)
+
+
+class AppSettingsRequest(BaseModel):
+    """Web-managed application settings."""
+
+    audio_format: str = "opus"
+    filename_template: str = Field(min_length=1, max_length=512)
+    organization_mode: str = "album"
+    use_primary_artist: bool = False
+    web_playlist_name: str | None = Field(default=None, max_length=128)
+    gotify_url: str | None = Field(default=None, max_length=2048)
+    gotify_token: str | None = Field(default=None, max_length=1024)
+    clear_gotify_token: bool = False
+    cookie_mode: str = "auto"
+    multi_user: bool = False
+    allow_ugc: bool = False
+    navidrome_url: str | None = Field(default=None, max_length=2048)
+    session_secret: str | None = Field(default=None, max_length=1024)
+    clear_session_secret: bool = False
+    session_https_only: bool = True
+    listenbrainz_web: bool = False
+
+
+class DownloadResponse(BaseModel):
+    """Response body for download endpoint."""
+
+    success: bool
+    message: str
+    file_path: str | None = None
+    file_name: str | None = None
+
+
+class TrackResponse(BaseModel):
+    """Track data for API responses."""
+
+    video_id: str
+    title: str
+    artist: str
+    artists: list[str]
+    album: str | None
+    duration: str
+    thumbnail_url: str | None
+    view_count: str | None
+    video_type: str | None = None
+
+
+def _track_to_response(track) -> TrackResponse:
+    """Convert a Track-like object into a TrackResponse."""
+    return TrackResponse(
+        video_id=track.video_id,
+        title=track.title,
+        artist=track.artist,
+        artists=track.artists,
+        album=track.album,
+        duration=track.duration_display,
+        thumbnail_url=track.thumbnail_url,
+        view_count=track.view_count,
+        video_type=getattr(track, "video_type", None),
+    )
+
+
+def _sse_event(event: str, payload: dict) -> str:
+    """Format a Server-Sent Event message."""
+    return f"event: {event}\ndata: {json.dumps(payload)}\n\n"
+
+
+class SearchResponse(BaseModel):
+    """Response body for search endpoint."""
+
+    query: str
+    results: list[TrackResponse]
+
+
+class AlbumResponse(BaseModel):
+    """Album data for API responses."""
+
+    browse_id: str
+    title: str
+    artist: str
+    year: int | None
+    track_count: int | None
+    thumbnail_url: str | None
+    audio_playlist_id: str | None = None
+    album_type: str | None = None
+    is_explicit: bool = False
+
+
+class AlbumSearchResponse(BaseModel):
+    """Response body for album search endpoint."""
+
+    query: str
+    results: list[AlbumResponse]
+
+
+class AlbumTracksResponse(BaseModel):
+    """Response body for album tracks endpoint."""
+
+    browse_id: str
+    album_title: str
+    tracks: list[TrackResponse]
+
+
+class StreamUrlResponse(BaseModel):
+    """Response for stream URL endpoint."""
+
+    video_id: str
+    url: str
+    expires_in: int
+    is_hls: bool = False
+
+
+class MoodCategoryResponse(BaseModel):
+    """A mood/genre category."""
+    title: str
+    params: str
+
+class MoodSectionResponse(BaseModel):
+    """A section of mood/genre categories."""
+    title: str
+    categories: list[MoodCategoryResponse]
+
+class MoodPlaylistResponse(BaseModel):
+    """A playlist from a mood/genre category."""
+    playlist_id: str
+    title: str
+    thumbnail_url: str | None
+    author: str | None
+
+class ChartTrackResponse(BaseModel):
+    """A chart track."""
+    video_id: str
+    title: str
+    artist: str
+    artists: list[str]
+    album: str | None
+    thumbnail_url: str | None
+    rank: str | None
+    trend: str | None
+    view_count: str | None = None
+    duration: str | None = None
+    video_type: str | None = None
+
+class ChartArtistResponse(BaseModel):
+    """A chart artist."""
+    browse_id: str
+    title: str
+    thumbnail_url: str | None
+    rank: str | None
+    trend: str | None
+
+class ChartsResponse(BaseModel):
+    """Charts response."""
+    country: str
+    tracks: list[ChartTrackResponse]
+    artists: list[ChartArtistResponse]
+
+
+class LibraryTrackResponse(BaseModel):
+    """A local audio file on disk."""
+    entry_path: str
+    title: str
+    artist: str
+    album: str | None
+    duration: str | None
+    file_size: int
+    modified_at: float
+
+
+class LibraryTracksResponse(BaseModel):
+    """Response body for the local library endpoint."""
+    tracks: list[LibraryTrackResponse]
+    total: int
+    limit: int
+    offset: int
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -371,7 +544,6 @@ async def api_save_listenbrainz_settings(
     """Save a ListenBrainz username for the current Musicload account."""
     _require_listenbrainz_web()
     from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
     from musicload.web.listenbrainz_settings import set_listenbrainz_settings
 
     username = settings.username.strip()
@@ -411,9 +583,16 @@ async def api_save_listenbrainz_settings(
     }
 
 
-def _fetch_listenbrainz_songs(username: str) -> list:
+async def _refresh_listenbrainz_recommendations(
+    username: str,
+    progress_callback: Callable[[dict], Awaitable[None]] | None = None,
+) -> dict:
+    """Fetch, match, and persist one user's weekly recommendations."""
     from musicload.plugins.base import PluginConfig
     from musicload.plugins.listenbrainz import ListenbrainzPlugin
+    from musicload.web.listenbrainz_settings import (
+        set_cached_recommendations,
+    )
 
     plugin_config = PluginConfig(
         name="web-listenbrainz",
@@ -429,34 +608,29 @@ def _fetch_listenbrainz_songs(username: str) -> list:
         },
     )
     try:
-        return ListenbrainzPlugin().fetch_songs(plugin_config)
+        songs = await asyncio.to_thread(ListenbrainzPlugin().fetch_songs, plugin_config)
     except Exception as error:
         if "Could not find <content>" in str(error) or "404" in str(error):
-            return []
-        raise
+            songs = []
+        else:
+            raise
 
-
-async def _match_listenbrainz_song(index: int, song, semaphore: asyncio.Semaphore):
-    try:
-        async with semaphore:
-            matches = await asyncio.to_thread(search, song.search_query, 1)
-    except Exception as error:
-        logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
-        matches = []
-    result = _track_to_response(matches[0]).model_dump() if matches else None
-    return index, result
-
-
-async def _match_listenbrainz_songs(
-    songs: list,
-    progress_callback: Callable[[dict], Awaitable[None]] | None,
-) -> list[dict]:
     total = len(songs)
     processed = 0
     indexed_results: list[tuple[int, dict]] = []
     semaphore = asyncio.Semaphore(4)
+
+    async def match_song(index: int, song) -> tuple[int, dict | None]:
+        try:
+            async with semaphore:
+                matches = await asyncio.to_thread(search, song.search_query, 1)
+        except Exception as error:
+            logger.warning("ListenBrainz match failed for %s: %s", song.search_query, error)
+            matches = []
+        return index, _track_to_response(matches[0]).model_dump() if matches else None
+
     tasks = [
-        asyncio.create_task(_match_listenbrainz_song(index, song, semaphore))
+        asyncio.create_task(match_song(index, song))
         for index, song in enumerate(songs)
     ]
     try:
@@ -480,18 +654,9 @@ async def _match_listenbrainz_songs(
                 task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-    return [result for _, result in sorted(indexed_results)]
 
+    results = [result for _, result in sorted(indexed_results)]
 
-async def _refresh_listenbrainz_recommendations(
-    username: str,
-    progress_callback: Callable[[dict], Awaitable[None]] | None = None,
-) -> dict:
-    """Fetch, match, and persist one user's weekly recommendations."""
-    from musicload.web.listenbrainz_settings import set_cached_recommendations
-
-    songs = await asyncio.to_thread(_fetch_listenbrainz_songs, username)
-    results = await _match_listenbrainz_songs(songs, progress_callback)
     payload = {
         "playlist_exists": bool(songs),
         "playlist_title": "Weekly Exploration",
@@ -568,7 +733,6 @@ async def _warm_listenbrainz_caches() -> None:
     if not config.listenbrainz_web:
         return
     from datetime import UTC, datetime, timedelta
-
     from musicload.web.listenbrainz_settings import (
         get_cached_recommendations,
         list_listenbrainz_settings,
@@ -596,96 +760,18 @@ async def _warm_listenbrainz_caches() -> None:
         await asyncio.sleep(6 * 60 * 60)
 
 
-def _listenbrainz_due_date(item: dict) -> str | None:
-    from datetime import datetime
-    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
-
-    try:
-        now = datetime.now(ZoneInfo(item["timezone"]))
-    except ZoneInfoNotFoundError:
-        logger.warning("Invalid ListenBrainz timezone for %s", item["account_name"])
-        return None
-    local_date = now.date().isoformat()
-    if item["last_run_date"] == local_date:
-        return None
-    if now.weekday() != item["download_weekday"]:
-        return None
-    if now.strftime("%H:%M") < item["download_time"]:
-        return None
-    return local_date
-
-
-async def _scheduled_listenbrainz_payload(item: dict) -> dict | None:
-    from musicload.web.listenbrainz_settings import get_cached_recommendations
-
-    try:
-        return await _refresh_listenbrainz_recommendations(item["username"])
-    except Exception:
-        logger.warning(
-            "Scheduled ListenBrainz refresh failed for %s; using cache",
-            item["username"],
-            exc_info=True,
-        )
-        return await asyncio.to_thread(
-            get_cached_recommendations, config.data_dir, item["username"]
-        )
-
-
-async def _queue_listenbrainz_tracks(item: dict, tracks: list[dict]) -> None:
-    if not queue_manager:
-        return
-    playlist_name = _listenbrainz_playlist_name(item["account_name"])
-    active_ids = {
-        job.video_id
-        for job in await queue_manager.list_jobs()
-        if job.status.value in {"queued", "downloading"}
-    }
-    for track in tracks:
-        if track["video_id"] in active_ids:
-            continue
-        await queue_manager.add_job(
-            video_id=track["video_id"],
-            title=track["title"],
-            artist=track["artist"],
-            format=config.audio_format,
-            artists=track.get("artists") or [],
-            album=track.get("album"),
-            playlist_name=playlist_name,
-        )
-        active_ids.add(track["video_id"])
-
-
-async def _run_listenbrainz_schedule(item: dict) -> None:
-    import hashlib
-
-    from musicload.web.listenbrainz_settings import mark_listenbrainz_run
-
-    local_date = _listenbrainz_due_date(item)
-    if local_date is None:
-        return
-    payload = await _scheduled_listenbrainz_payload(item)
-    if payload is None:
-        return
-    tracks = payload.get("results") or []
-    playlist_hash = hashlib.sha256(
-        "\n".join(track["video_id"] for track in tracks).encode("utf-8")
-    ).hexdigest()
-    if tracks and playlist_hash != item.get("last_download_hash"):
-        await _queue_listenbrainz_tracks(item, tracks)
-    await asyncio.to_thread(
-        mark_listenbrainz_run,
-        config.data_dir,
-        item["account_name"],
-        local_date,
-        playlist_hash,
-    )
-
-
 async def _listenbrainz_scheduler() -> None:
     """Queue each account's new cached playlist at its optional local time."""
     if not config.listenbrainz_web:
         return
-    from musicload.web.listenbrainz_settings import list_listenbrainz_settings
+    import hashlib
+    from datetime import datetime
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+    from musicload.web.listenbrainz_settings import (
+        get_cached_recommendations,
+        list_listenbrainz_settings,
+        mark_listenbrainz_run,
+    )
 
     poll_seconds = 60
     while True:
@@ -696,8 +782,65 @@ async def _listenbrainz_scheduler() -> None:
             settings = await asyncio.to_thread(list_listenbrainz_settings, config.data_dir)
             poll_seconds = 60 if any(item["auto_download"] for item in settings) else 300
             for item in settings:
-                if item["auto_download"]:
-                    await _run_listenbrainz_schedule(item)
+                if not item["auto_download"]:
+                    continue
+                try:
+                    now = datetime.now(ZoneInfo(item["timezone"]))
+                except ZoneInfoNotFoundError:
+                    logger.warning("Invalid ListenBrainz timezone for %s", item["account_name"])
+                    continue
+                local_date = now.date().isoformat()
+                if item["last_run_date"] == local_date:
+                    continue
+                if now.weekday() != item["download_weekday"]:
+                    continue
+                if now.strftime("%H:%M") < item["download_time"]:
+                    continue
+
+                try:
+                    payload = await _refresh_listenbrainz_recommendations(item["username"])
+                except Exception:
+                    logger.warning(
+                        "Scheduled ListenBrainz refresh failed for %s; using cache",
+                        item["username"],
+                        exc_info=True,
+                    )
+                    payload = await asyncio.to_thread(
+                        get_cached_recommendations, config.data_dir, item["username"]
+                    )
+                    if payload is None:
+                        continue
+                tracks = payload.get("results") or []
+                playlist_hash = hashlib.sha256(
+                    "\n".join(track["video_id"] for track in tracks).encode("utf-8")
+                ).hexdigest()
+                if tracks and playlist_hash != item.get("last_download_hash"):
+                    playlist_name = _listenbrainz_playlist_name(item["account_name"])
+                    active_ids = {
+                        job.video_id
+                        for job in await queue_manager.list_jobs()
+                        if job.status.value in {"queued", "downloading"}
+                    }
+                    for track in tracks:
+                        if track["video_id"] in active_ids:
+                            continue
+                        await queue_manager.add_job(
+                            video_id=track["video_id"],
+                            title=track["title"],
+                            artist=track["artist"],
+                            format=config.audio_format,
+                            artists=track.get("artists") or [],
+                            album=track.get("album"),
+                            playlist_name=playlist_name,
+                        )
+                        active_ids.add(track["video_id"])
+                await asyncio.to_thread(
+                    mark_listenbrainz_run,
+                    config.data_dir,
+                    item["account_name"],
+                    local_date,
+                    playlist_hash,
+                )
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -749,8 +892,382 @@ async def resolve_google_share(url: str = Query(..., min_length=1)):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-# Search and album endpoints
-app.include_router(search_router)
+@app.get("/api/search", response_model=SearchResponse)
+async def api_search(q: str = Query(..., min_length=1, description="Search query or supported URL (YouTube Music, YouTube, Deezer playlist)")):
+    """Search for music on YouTube Music or fetch tracks from a supported URL."""
+    import logging
+    logger = logging.getLogger(__name__)
+    config = get_config()
+
+    from musicload.deezer import DeezerQuotaError
+    from musicload.deezer import get_tracks_from_url as get_deezer_tracks_from_url
+    from musicload.deezer import is_deezer_url
+    # Import URL handling functions from search module
+    from musicload.search import parse_youtube_url, get_track_from_video_id, get_playlist_tracks
+
+    if is_deezer_url(q):
+        # Deezer playlist URL -> resolve each Deezer track to YouTube Music
+        try:
+            deezer_tracks = get_deezer_tracks_from_url(q)
+        except DeezerQuotaError as e:
+            logger.warning("Deezer quota exceeded for '%s': %s", q, e)
+            raise HTTPException(
+                status_code=503,
+                detail=str(e),
+            )
+        except Exception as e:
+            logger.error("Deezer fetch failed for '%s': %s", q, e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to fetch Deezer playlist: {str(e)}",
+            )
+
+        if not deezer_tracks:
+            raise HTTPException(
+                status_code=404,
+                detail="Deezer playlist is empty or unavailable",
+            )
+
+        results = []
+        for dz_track in deezer_tracks:
+            yt_results = search(dz_track.search_query, limit=1)
+            if yt_results:
+                results.append(yt_results[0])
+            else:
+                logger.warning(
+                    "No YouTube Music match for Deezer track: %s - %s",
+                    dz_track.artist,
+                    dz_track.name,
+                )
+
+        if not results:
+            raise HTTPException(
+                status_code=404,
+                detail="No Deezer tracks could be matched on YouTube Music",
+            )
+    else:
+        # Check if query is a YouTube URL
+        url_info = parse_youtube_url(q)
+
+        if url_info:
+            # Handle URL input
+            try:
+                if url_info['type'] == 'video':
+                    # Single track from video_id
+                    track = get_track_from_video_id(url_info['id'])
+                    results = [track]
+                elif url_info['type'] == 'playlist':
+                    # All tracks from playlist (no limit)
+                    # Pass allow_ugc=True so web UI can show all tracks with UGC badge
+                    results = get_playlist_tracks(url_info['id'], allow_ugc=config.allow_ugc)
+                    if not results:
+                        raise HTTPException(
+                            status_code=404,
+                            detail="Playlist is empty or unavailable"
+                        )
+                elif url_info['type'] == 'unsupported_radio':
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Radio playlists are not supported. Please use a regular playlist or single track URL."
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Unsupported URL type"
+                    )
+            except ValueError as e:
+                # Video/playlist not found
+                logger.warning("URL fetch failed for '%s': %s", q, e)
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Video or playlist not found: {str(e)}"
+                )
+            except HTTPException:
+                # Re-raise HTTPException as-is
+                raise
+            except Exception as e:
+                logger.error("URL fetch failed for '%s': %s", q, e)
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to fetch from URL: {str(e)}"
+                )
+        else:
+            # Handle regular text search (existing logic) — cached
+            cached = _search_cache.get(f"search:{q}")
+            if cached is not None:
+                results = cached
+            else:
+                try:
+                    results = search(q, limit=20)
+                except Exception as e:
+                    logger.error("Search failed for query '%s': %s", q, e)
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"Search failed: {str(e)}"
+                    )
+                _search_cache.put(f"search:{q}", results)
+
+    return SearchResponse(
+        query=q,
+        results=[_track_to_response(track) for track in results],
+    )
+
+
+@app.get("/api/search/playlist/stream")
+async def api_search_playlist_stream(
+    request: Request,
+    q: str = Query(..., min_length=1, description="Playlist URL (YouTube Music, YouTube, Deezer)"),
+):
+    """Stream playlist search progress and results via SSE."""
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    from musicload.deezer import DeezerQuotaError
+    from musicload.deezer import get_tracks_from_url as get_deezer_tracks_from_url
+    from musicload.deezer import is_deezer_url
+    from musicload.search import get_playlist_tracks, parse_youtube_url, search as yt_search
+
+    async def event_generator():
+        try:
+            if is_deezer_url(q):
+                yield _sse_event(
+                    "progress",
+                    {
+                        "stage": "fetching",
+                        "message": "Fetching Deezer playlist tracks...",
+                    },
+                )
+
+                try:
+                    deezer_tracks = await asyncio.to_thread(get_deezer_tracks_from_url, q)
+                except DeezerQuotaError as e:
+                    logger.warning("Deezer quota exceeded for '%s': %s", q, e)
+                    yield _sse_event("failure", {"message": str(e)})
+                    return
+                except Exception as e:
+                    logger.error("Deezer fetch failed for '%s': %s", q, e)
+                    yield _sse_event(
+                        "failure",
+                        {"message": f"Failed to fetch Deezer playlist: {str(e)}"},
+                    )
+                    return
+
+                if not deezer_tracks:
+                    yield _sse_event(
+                        "failure",
+                        {"message": "Deezer playlist is empty or unavailable"},
+                    )
+                    return
+
+                total = len(deezer_tracks)
+                processed = 0
+                matched = 0
+                results = []
+
+                yield _sse_event(
+                    "progress",
+                    {
+                        "stage": "matching",
+                        "total": total,
+                        "processed": processed,
+                        "matched": matched,
+                    },
+                )
+
+                for dz_track in deezer_tracks:
+                    if await request.is_disconnected():
+                        return
+
+                    processed += 1
+                    try:
+                        yt_results = await asyncio.to_thread(
+                            yt_search, dz_track.search_query, 1
+                        )
+                    except Exception as e:
+                        logger.warning(
+                            "Search failed for Deezer track '%s - %s': %s",
+                            dz_track.artist,
+                            dz_track.name,
+                            e,
+                        )
+                        yt_results = []
+
+                    if yt_results:
+                        results.append(yt_results[0])
+                        matched += 1
+
+                    yield _sse_event(
+                        "progress",
+                        {
+                            "stage": "matching",
+                            "total": total,
+                            "processed": processed,
+                            "matched": matched,
+                        },
+                    )
+
+                if not results:
+                    yield _sse_event(
+                        "failure",
+                        {"message": "No Deezer tracks could be matched on YouTube Music"},
+                    )
+                    return
+
+                payload_results = [_track_to_response(track).model_dump() for track in results]
+                yield _sse_event(
+                    "complete",
+                    {
+                        "results": payload_results,
+                        "total": len(payload_results),
+                    },
+                )
+                return
+
+            url_info = parse_youtube_url(q)
+            if not url_info:
+                yield _sse_event(
+                    "failure",
+                    {"message": "Only playlist URLs are supported for streaming search"},
+                )
+                return
+
+            if url_info["type"] == "unsupported_radio":
+                yield _sse_event(
+                    "failure",
+                    {
+                        "message": "Radio playlists are not supported. Please use a regular playlist or single track URL.",
+                    },
+                )
+                return
+
+            if url_info["type"] != "playlist":
+                yield _sse_event(
+                    "failure",
+                    {"message": "Only playlist URLs are supported for streaming search"},
+                )
+                return
+
+            yield _sse_event(
+                "progress",
+                {
+                    "stage": "fetching",
+                    "message": "Fetching playlist tracks...",
+                },
+            )
+
+            try:
+                config = get_config()
+                tracks = await asyncio.to_thread(get_playlist_tracks, url_info["id"], config.allow_ugc)
+            except ValueError as e:
+                yield _sse_event("failure", {"message": str(e)})
+                return
+            except Exception as e:
+                logger.error("Playlist fetch failed for '%s': %s", q, e)
+                yield _sse_event(
+                    "failure", {"message": f"Failed to fetch playlist: {str(e)}"}
+                )
+                return
+
+            if not tracks:
+                yield _sse_event(
+                    "failure", {"message": "Playlist is empty or unavailable"}
+                )
+                return
+
+            payload_results = [_track_to_response(track).model_dump() for track in tracks]
+            yield _sse_event(
+                "progress",
+                {
+                    "stage": "resolved",
+                    "total": len(payload_results),
+                    "processed": len(payload_results),
+                    "matched": len(payload_results),
+                    "message": f"Found {len(payload_results)} tracks",
+                },
+            )
+            yield _sse_event(
+                "complete",
+                {
+                    "results": payload_results,
+                    "total": len(payload_results),
+                },
+            )
+        except Exception as e:
+            logger.error("Playlist streaming search failed for '%s': %s", q, e)
+            yield _sse_event(
+                "failure", {"message": f"Playlist search failed: {str(e)}"}
+            )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/search/albums", response_model=AlbumSearchResponse)
+async def api_search_albums(q: str = Query(..., min_length=1)):
+    """Search YouTube Music for albums."""
+    from musicload.search import search_albums
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    cached = _album_search_cache.get(f"album_search:{q}")
+    if cached is not None:
+        results = cached
+    else:
+        try:
+            results = search_albums(q, limit=20)
+        except Exception as e:
+            logger.error("Album search failed for query '%s': %s", q, e)
+            raise HTTPException(
+                status_code=500,
+                detail=f"Album search failed: {str(e)}"
+            )
+        _album_search_cache.put(f"album_search:{q}", results)
+
+    return AlbumSearchResponse(
+        query=q,
+        results=[AlbumResponse(**album.__dict__) for album in results],
+    )
+
+
+@app.get("/api/album/{browse_id}/tracks", response_model=AlbumTracksResponse)
+async def api_get_album_tracks(browse_id: str):
+    """Get all tracks for an album."""
+    from musicload.search import get_album_tracks
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    cache_key = f"album_tracks:{browse_id}"
+    cached = _album_tracks_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        tracks = get_album_tracks(browse_id)
+        if not tracks:
+            raise HTTPException(status_code=404, detail="No tracks found for this album")
+
+        response = AlbumTracksResponse(
+            browse_id=browse_id,
+            album_title=tracks[0].album if tracks else "Unknown Album",
+            tracks=[_track_to_response(track) for track in tracks],
+        )
+        _album_tracks_cache.put(cache_key, response)
+        return response
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to get album tracks: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.post("/api/download", response_model=DownloadResponse)
@@ -813,46 +1330,31 @@ def _resolve_downloaded_file_path(file_path: str, download_dir: Path) -> Path:
     return abs_requested
 
 
-def _remove_deleted_track_from_playlists(entry_path: str, download_dir: Path) -> None:
-    """Remove an exact deleted path from every root-level Musicload playlist."""
-    for playlist_path in download_dir.glob("*.m3u"):
-        try:
-            remove_from_m3u(entry_path, playlist_path.stem, download_dir)
-        except OSError as error:
-            logger.warning(
-                "Failed to remove deleted track from %s: %s", playlist_path, error
-            )
-
-
 def _delete_downloaded_audio_file(file_path: str) -> str:
-    """Delete an audio file, its sidecars, and directories left without songs."""
+    """Delete one validated audio file and return its relative library path."""
     from musicload.tagging import SUPPORTED_EXTENSIONS
 
-    runtime_config = get_config()
-    download_dir = runtime_config.download_dir.resolve()
+    download_dir = get_config().download_dir.resolve()
     abs_path = _resolve_downloaded_file_path(file_path, download_dir)
     if not abs_path.exists() or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     if abs_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an audio file")
 
+    try:
+        abs_path.unlink()
+    except OSError as error:
+        logger.error("Failed to delete file %s: %s", abs_path, error)
+        raise HTTPException(status_code=500, detail=f"Failed to delete file: {error}")
+
+    parent = abs_path.parent
+    try:
+        if parent != download_dir and parent.exists() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        pass
     relative_path = str(abs_path.relative_to(download_dir))
-    try:
-        from musicload.download_cleanup import delete_track_files
-
-        delete_track_files(abs_path, download_dir, SUPPORTED_EXTENSIONS)
-    except OSError as error:
-        logger.error("Failed to delete track files for %s: %s", abs_path, error)
-        raise HTTPException(status_code=500, detail=f"Failed to delete track: {error}")
-
-    _remove_deleted_track_from_playlists(relative_path, download_dir)
     _library_metadata_cache.pop(relative_path, None)
-    try:
-        from musicload.web.library_cache import delete_cached_file
-
-        delete_cached_file(runtime_config.data_dir, relative_path)
-    except OSError as error:
-        logger.warning("Could not remove Local Files cache entry %s: %s", relative_path, error)
     return relative_path
 
 
@@ -877,268 +1379,156 @@ async def download_file(file_path: str):
         )
     except HTTPException:
         raise
-    except Exception as error:
-        raise HTTPException(
-            status_code=500, detail="Failed to serve file"
-        ) from error
+    except Exception as e:
+        raise HTTPException(status_code=500, detail="Failed to serve file")
 
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
-_PLAYBACK_DEBUG_ID_RE = re.compile(r"^[A-Z0-9]{6,16}$")
-_PLAYBACK_SESSION_RE = re.compile(r"^[a-f0-9]{24}$")
-_PLAYBACK_SESSION_TTL_SECONDS = 15 * 60
-_PLAYBACK_EXTENSIONS = (".m4a", ".mp4", ".webm", ".ogg", ".opus")
-_PLAYBACK_ERROR_MESSAGES = {
-    "P100": "Invalid playback request",
-    "P401": "The temporary playback audio could not be prepared",
-    "P402": "The playback preparation produced no playable audio file",
-    "P399": "Unexpected preview error",
-}
 
 
-class _PlaybackPreviewError(RuntimeError):
-    """Internal preview failure with a stable, user-reportable error code."""
-
-    def __init__(self, code: str, technical_reason: str):
-        super().__init__(technical_reason)
-        self.code = code
-        self.technical_reason = technical_reason
-
-
-@dataclass
-class _PlaybackSession:
-    video_id: str
-    path: Path
-    last_access: float
-
-
-def _validated_playback_debug_id(debug_id: str | None) -> str | None:
-    if debug_id is None:
-        return None
-    normalized = debug_id.strip().upper()
-    if not _PLAYBACK_DEBUG_ID_RE.fullmatch(normalized):
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "P100", "message": _PLAYBACK_ERROR_MESSAGES["P100"]},
-        )
-    return normalized
-
-
-def _record_preview_failure(
-    debug_id: str | None,
-    video_id: str,
-    code: str,
-    technical_reason: str,
-) -> dict[str, str]:
-    """Correlate a short browser code with the detailed server-side log entry."""
-    payload = {
-        "code": code,
-        "message": _PLAYBACK_ERROR_MESSAGES.get(code, _PLAYBACK_ERROR_MESSAGES["P399"]),
-        "debug_id": debug_id or "SERVER",
-    }
-    if debug_id:
-        _preview_diagnostics.put(debug_id, payload)
-    logger.warning(
-        "Playback preview failed [%s/%s] for %s: %s",
-        debug_id or "SERVER",
-        code,
-        video_id,
-        technical_reason,
-    )
-    return payload
-
-
-def _playback_media_type(path: Path) -> str:
-    return {
-        ".m4a": "audio/mp4",
-        ".mp4": "audio/mp4",
-        ".webm": "audio/webm",
-        ".ogg": "audio/ogg",
-        ".opus": "audio/ogg",
-    }.get(path.suffix.lower(), "application/octet-stream")
-
-
-def _delete_playback_file(path: Path) -> None:
-    """Delete only files owned by this process's private temporary directory."""
-    try:
-        if path.resolve().parent != _playback_temp_dir.resolve():
-            logger.error("Refused to delete playback path outside temporary directory: %s", path)
-            return
-        path.unlink(missing_ok=True)
-    except OSError as error:
-        logger.warning("Could not delete temporary playback file %s: %s", path, error)
-
-
-def _delete_playback_session(session_id: str) -> None:
-    session = _playback_sessions.pop(session_id, None)
-    if session:
-        _delete_playback_file(session.path)
-
-
-def _delete_all_playback_sessions() -> None:
-    for session_id in list(_playback_sessions):
-        _delete_playback_session(session_id)
-
-
-def _expire_playback_sessions(now: float | None = None) -> int:
-    cutoff = (time.monotonic() if now is None else now) - _PLAYBACK_SESSION_TTL_SECONDS
-    expired = [
-        session_id
-        for session_id, session in _playback_sessions.items()
-        if session.last_access < cutoff
-    ]
-    for session_id in expired:
-        _delete_playback_session(session_id)
-    return len(expired)
-
-
-async def _playback_session_reaper() -> None:
-    """Remove abandoned sessions; normal playback deletes immediately on stop/end."""
-    while True:
-        await asyncio.sleep(60)
-        _expire_playback_sessions()
-
-
-def _prepare_playback_file_sync(video_id: str, session_id: str) -> Path:
-    """Download source audio only: no conversion, cover, tags, lyrics, or database."""
+def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]]:
+    """Resolve one direct audio URL and the request headers it requires."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
-    runtime_config = get_config()
-    output_template = _playback_temp_dir / f"{session_id}.%(ext)s"
-    options = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio[ext=webm]/bestaudio",
-        "outtmpl": str(output_template),
-        "noplaylist": True,
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "socket_timeout": 30,
-    }
-    prepared_path: Path | None = None
-    try:
-        extract_info_with_retry(
-            ydl_opts=options,
-            url=f"https://music.youtube.com/watch?v={video_id}",
-            download=True,
-            cookie_file=runtime_config.cookie_file_path,
-            config=runtime_config,
-        )
-        candidates = [
-            path
-            for path in _playback_temp_dir.glob(f"{session_id}.*")
-            if path.is_file()
-            and path.suffix.lower() in _PLAYBACK_EXTENSIONS
-            and path.stat().st_size > 0
+    youtube_url = f"https://music.youtube.com/watch?v={video_id}"
+    ydl_opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True}
+    info = extract_info_with_retry(
+        ydl_opts=ydl_opts,
+        url=youtube_url,
+        download=False,
+        cookie_file=config.cookie_file_path,
+        config=config,
+    )
+    selected_format = info
+    if "url" in info:
+        stream_url = info["url"]
+    else:
+        audio_formats = [
+            item
+            for item in info.get("formats", [])
+            if item.get("acodec") != "none" and item.get("url")
         ]
-        if not candidates:
-            raise _PlaybackPreviewError(
-                "P402", "yt-dlp completed without a supported audio output"
-            )
-        prepared_path = max(candidates, key=lambda path: path.stat().st_size)
-        return prepared_path
-    except _PlaybackPreviewError:
-        raise
-    except Exception as error:
-        raise _PlaybackPreviewError("P401", str(error)) from error
-    finally:
-        for partial in _playback_temp_dir.glob(f"{session_id}.*"):
-            if partial != prepared_path:
-                _delete_playback_file(partial)
-
-
-@app.get("/api/preview-diagnostics/{debug_id}")
-async def preview_diagnostics(debug_id: str):
-    """Return the short server-side failure code for one browser preview."""
-    normalized = _validated_playback_debug_id(debug_id)
-    diagnostic = _preview_diagnostics.get(normalized)
-    if diagnostic:
-        return diagnostic
-    return {
-        "code": "P299",
-        "message": "No server-side preview failure was recorded",
-        "debug_id": normalized,
+        if not audio_formats:
+            raise ValueError("No audio stream found")
+        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
+        stream_url = selected_format["url"]
+    protocol = selected_format.get("protocol") or info.get("protocol")
+    is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
+    raw_headers = selected_format.get("http_headers") or info.get("http_headers") or {}
+    http_headers = {
+        str(name): str(value)
+        for name, value in raw_headers.items()
+        if value is not None and "\r" not in str(name) and "\n" not in str(name)
+        and "\r" not in str(value) and "\n" not in str(value)
     }
+    return stream_url, is_hls, http_headers
 
 
-@app.post("/api/playback/prepare/{video_id}")
-async def prepare_playback(
-    video_id: str,
-    debug_id: str | None = Query(None, max_length=16),
-):
-    """Prepare one raw audio file in process-private /tmp storage."""
-    diagnostic_id = _validated_playback_debug_id(debug_id)
+async def _resolve_audio_stream(video_id: str) -> tuple[str, bool, dict[str, str]]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
-        detail = _record_preview_failure(
-            diagnostic_id, video_id, "P100", "invalid video ID"
-        )
-        raise HTTPException(status_code=400, detail=detail)
-
-    session_id = secrets.token_hex(12)
+        raise HTTPException(status_code=400, detail="Invalid video ID")
+    cached = _stream_url_cache.get(video_id)
+    if cached is not None:
+        return cached
     try:
-        async with _playback_download_slots:
-            playback_file = await asyncio.to_thread(
-                _prepare_playback_file_sync, video_id, session_id
-            )
-        _playback_sessions[session_id] = _PlaybackSession(
-            video_id=video_id,
-            path=playback_file,
-            last_access=time.monotonic(),
-        )
-    except _PlaybackPreviewError as error:
-        detail = _record_preview_failure(
-            diagnostic_id, video_id, error.code, error.technical_reason
-        )
-        raise HTTPException(status_code=502, detail=detail) from error
+        resolved = await asyncio.to_thread(_resolve_audio_stream_sync, video_id)
     except Exception as error:
-        detail = _record_preview_failure(
-            diagnostic_id, video_id, "P399", str(error)
+        raise HTTPException(status_code=502, detail="Failed to resolve audio stream") from error
+    _stream_url_cache.put(video_id, resolved)
+    return resolved
+
+
+@app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
+async def get_stream_url(video_id: str):
+    """Get a cached direct stream URL without blocking the event loop."""
+    stream_url, is_hls, _ = await _resolve_audio_stream(video_id)
+    return StreamUrlResponse(
+        video_id=video_id,
+        url=stream_url,
+        expires_in=300,
+        is_hls=is_hls,
+    )
+
+
+@app.get("/api/preview/{video_id}")
+async def preview_audio(video_id: str):
+    """Stream audio through Musicload instead of exposing the source URL.
+
+    Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
+    converts it to MP3 that browsers can play progressively.
+    """
+    stream_url, _, http_headers = await _resolve_audio_stream(video_id)
+
+    cmd = _preview_ffmpeg_command(stream_url, http_headers)
+
+    process = await asyncio.create_subprocess_exec(
+        *cmd,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+
+    async def stream_audio():
+        try:
+            while True:
+                chunk = await process.stdout.read(8192)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            if process.returncode is None:
+                process.kill()
+
+    return StreamingResponse(stream_audio(), media_type="audio/mpeg")
+
+
+def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> list[str]:
+    """Build the ffmpeg preview command, preserving yt-dlp request headers."""
+    cmd = ['ffmpeg', '-nostdin']
+    if http_headers:
+        ffmpeg_headers = "".join(
+            f"{name}: {value}\r\n" for name, value in http_headers.items()
         )
-        logger.exception("Unexpected playback preview failure [%s]", diagnostic_id)
-        raise HTTPException(status_code=500, detail=detail) from error
-    return JSONResponse(
-        {
-            "session_id": session_id,
-            "url": f"/api/playback/file/{session_id}",
-            "expires_in": _PLAYBACK_SESSION_TTL_SECONDS,
-        },
-        headers={
-            "Cache-Control": "no-store",
-            "X-Playback-Debug-ID": diagnostic_id or "SERVER",
-        },
-    )
-
-
-@app.get("/api/playback/file/{session_id}")
-async def playback_file(session_id: str):
-    """Serve the prepared file with native browser Range support."""
-    if not _PLAYBACK_SESSION_RE.fullmatch(session_id):
-        raise HTTPException(status_code=400, detail="Invalid playback session")
-    session = _playback_sessions.get(session_id)
-    if not session or not session.path.is_file():
-        raise HTTPException(status_code=404, detail="Playback session expired")
-    session.last_access = time.monotonic()
-    return FileResponse(
-        path=session.path,
-        media_type=_playback_media_type(session.path),
-        headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "no-store",
-        },
-    )
-
-
-@app.delete("/api/playback/session/{session_id}", status_code=204)
-async def delete_playback_session(session_id: str):
-    """Delete a playback file immediately after stop, track change, or end."""
-    if not _PLAYBACK_SESSION_RE.fullmatch(session_id):
-        raise HTTPException(status_code=400, detail="Invalid playback session")
-    _delete_playback_session(session_id)
-    return Response(status_code=204)
+        cmd.extend(['-headers', ffmpeg_headers])
+    cmd.extend([
+        '-i', stream_url,
+        '-vn',
+        '-f', 'mp3',
+        '-ab', '128k',
+        '-loglevel', 'error',
+        'pipe:1',
+    ])
+    return cmd
 
 
 # Queue endpoints
+
+
+class QueueAddRequest(BaseModel):
+    """Request to add a job to the queue."""
+
+    video_id: str
+    title: str
+    artist: str
+    artists: list[str] | None = None
+    album: str | None = None
+    audio_format: str = "opus"
+
+
+class QueueAddAlbumRequest(BaseModel):
+    """Request to add an album to the queue."""
+
+    browse_id: str
+    album_title: str
+    artist: str
+    album_year: int | None = None
+    audio_format: str = "opus"
+
+
+class QueueAddResponse(BaseModel):
+    """Response after adding a job."""
+
+    job_id: str | None = None
+    status: str
 
 
 @app.post("/api/queue/add", response_model=QueueAddResponse)
@@ -1194,9 +1584,8 @@ async def add_album_to_queue(request: QueueAddAlbumRequest, http_request: Reques
     if not queue_manager:
         raise HTTPException(status_code=500, detail="Queue manager not initialized")
 
-    import logging
-
     from musicload.search import get_album_tracks
+    import logging
 
     logger = logging.getLogger(__name__)
 
@@ -1352,7 +1741,173 @@ async def get_queue_stats():
 
 
 # Explore endpoints
-app.include_router(explore_router)
+
+@app.get("/api/explore/moods")
+async def api_explore_moods():
+    """Get mood & genre categories."""
+    from musicload.search import get_mood_categories
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cached = _moods_cache.get("moods")
+    if cached is not None:
+        return cached
+
+    try:
+        sections = get_mood_categories()
+        result = [
+            MoodSectionResponse(
+                title=s.title,
+                categories=[MoodCategoryResponse(title=c.title, params=c.params) for c in s.categories],
+            )
+            for s in sections
+        ]
+        _moods_cache.put("moods", result)
+        return result
+    except Exception as e:
+        logger.error("Failed to get mood categories: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get mood categories: {str(e)}")
+
+
+@app.get("/api/explore/mood-playlists")
+async def api_explore_mood_playlists(params: str = Query(..., description="Category params from moods endpoint")):
+    """Get playlists for a mood/genre category."""
+    from musicload.search import get_mood_playlists
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cache_key = f"mood_playlists:{params}"
+    cached = _mood_playlists_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        playlists = get_mood_playlists(params)
+        result = [
+            MoodPlaylistResponse(
+                playlist_id=p.playlist_id,
+                title=p.title,
+                thumbnail_url=p.thumbnail_url,
+                author=p.author,
+            )
+            for p in playlists
+        ]
+        _mood_playlists_cache.put(cache_key, result)
+        return result
+    except Exception as e:
+        logger.error("Failed to get mood playlists: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get mood playlists: {str(e)}")
+
+
+@app.get("/api/explore/charts")
+async def api_explore_charts(country: str = Query("ZZ", description="ISO 3166-1 Alpha-2 country code")):
+    """Get current music charts."""
+    from musicload.search import get_charts
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # Validate country code format
+    if not re.match(r"^[A-Z]{2}$", country):
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid country code '{country}': must be a 2-letter uppercase ISO 3166-1 Alpha-2 code (e.g., 'US', 'GB', 'ZZ')"
+        )
+
+    cache_key = f"charts:{country}"
+    cached = _charts_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        config = get_config()
+        charts = get_charts(country, allow_ugc=config.allow_ugc)
+        response = ChartsResponse(
+            country=charts.country,
+            tracks=[
+                ChartTrackResponse(
+                    video_id=t.video_id,
+                    title=t.title,
+                    artist=t.artist,
+                    artists=t.artists,
+                    album=t.album,
+                    thumbnail_url=t.thumbnail_url,
+                    rank=t.rank,
+                    trend=t.trend,
+                    view_count=t.view_count,
+                    duration=t.duration_display,
+                    video_type=t.video_type,
+                )
+                for t in charts.tracks
+            ],
+            artists=[
+                ChartArtistResponse(
+                    browse_id=a.browse_id,
+                    title=a.title,
+                    thumbnail_url=a.thumbnail_url,
+                    rank=a.rank,
+                    trend=a.trend,
+                )
+                for a in charts.artists
+            ],
+        )
+        _charts_cache.put(cache_key, response)
+        return response
+    except Exception as e:
+        logger.error("Failed to get charts: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get charts: {str(e)}")
+
+
+@app.get("/api/explore/new-releases")
+async def api_explore_new_releases():
+    """Get new album releases from YouTube Music."""
+    from musicload.search import get_new_releases
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cached = _new_releases_cache.get("new_releases")
+    if cached is not None:
+        return cached
+
+    try:
+        albums = get_new_releases()
+        result = [
+            AlbumResponse(**album.model_dump())
+            for album in albums
+        ]
+        _new_releases_cache.put("new_releases", result)
+        return result
+    except Exception as e:
+        logger.error("Failed to get new releases: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get new releases: {str(e)}")
+
+
+@app.get("/api/explore/playlist/{playlist_id}/tracks")
+async def api_explore_playlist_tracks(playlist_id: str):
+    """Get tracks from a YouTube Music playlist (mood/genre playlist)."""
+    from musicload.search import get_playlist_tracks
+    import logging
+    logger = logging.getLogger(__name__)
+
+    cache_key = f"playlist_tracks:{playlist_id}"
+    cached = _playlist_tracks_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        config = get_config()
+        tracks = get_playlist_tracks(playlist_id, allow_ugc=config.allow_ugc)
+        result = {
+            "playlist_id": playlist_id,
+            "tracks": [_track_to_response(track) for track in tracks],
+        }
+        _playlist_tracks_cache.put(cache_key, result)
+        return result
+    except ValueError as e:
+        logger.warning("Playlist unavailable: %s", e)
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error("Failed to get playlist tracks: %s", e)
+        raise HTTPException(status_code=500, detail=f"Failed to get playlist tracks: {str(e)}")
 
 
 @app.get("/api/image-proxy")
@@ -1382,6 +1937,44 @@ async def api_image_proxy(url: str = Query(..., description="Image URL to proxy"
     )
 
 
+def _clean_optional_setting(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    return cleaned or None
+
+
+def _settings_response() -> dict:
+    """Return effective values while redacting stored secrets."""
+    from musicload.settings import RESTART_REQUIRED_SETTINGS, load_settings
+
+    effective = get_config()
+    overrides = load_settings(effective.data_dir)
+    values = {
+        "audio_format": effective.audio_format,
+        "filename_template": effective.filename_template,
+        "organization_mode": effective.organization_mode,
+        "use_primary_artist": effective.use_primary_artist,
+        "web_playlist_name": effective.web_playlist_name or "",
+        "gotify_url": effective.gotify_url or "",
+        "cookie_mode": effective.cookie_mode,
+        "multi_user": effective.multi_user,
+        "allow_ugc": effective.allow_ugc,
+        "navidrome_url": effective.navidrome_url or "",
+        "session_https_only": effective.session_https_only,
+        "listenbrainz_web": effective.listenbrainz_web,
+    }
+    return {
+        "values": values,
+        "configured": {
+            "gotify_token": bool(effective.gotify_token),
+            "session_secret": bool(effective.session_secret),
+        },
+        "overridden": sorted(overrides),
+        "restart_required_fields": sorted(RESTART_REQUIRED_SETTINGS),
+    }
+
+
 @app.get("/api/settings")
 async def api_get_settings(request: Request):
     """Return effective application settings for an administrator."""
@@ -1393,11 +1986,85 @@ async def api_get_settings(request: Request):
 async def api_save_settings(payload: AppSettingsRequest, request: Request):
     """Persist application settings managed by the web interface."""
     _require_admin(request)
+    from urllib.parse import urlparse
+
     from musicload.settings import load_settings, save_settings
+
+    if payload.audio_format not in {"opus", "mp3", "flac"}:
+        raise HTTPException(status_code=400, detail="Invalid audio format")
+    if payload.organization_mode not in {"flat", "album"}:
+        raise HTTPException(status_code=400, detail="Invalid organization mode")
+    if payload.cookie_mode not in {"auto", "always", "never"}:
+        raise HTTPException(status_code=400, detail="Invalid cookie mode")
+
+    navidrome_url = _clean_optional_setting(payload.navidrome_url)
+    gotify_url = _clean_optional_setting(payload.gotify_url)
+    for label, url in (("Navidrome URL", navidrome_url), ("Gotify URL", gotify_url)):
+        if url:
+            parsed = urlparse(url)
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+                raise HTTPException(status_code=400, detail=f"{label} must be an HTTP(S) URL")
+
+    playlist_name = _clean_optional_setting(payload.web_playlist_name)
+    if playlist_name and (
+        playlist_name in {".", ".."}
+        or "/" in playlist_name
+        or "\\" in playlist_name
+    ):
+        raise HTTPException(status_code=400, detail="Playlist name must not contain a path")
+
+    filename_template = payload.filename_template.strip()
+    if not filename_template:
+        raise HTTPException(status_code=400, detail="Filename template is required")
 
     effective = get_config()
     existing_overrides = load_settings(effective.data_dir)
-    values = build_settings_values(payload, effective, existing_overrides)
+
+    new_session_secret = _clean_optional_setting(payload.session_secret)
+    if payload.clear_session_secret:
+        candidate_session_secret = None
+    elif new_session_secret is not None:
+        candidate_session_secret = new_session_secret
+    else:
+        candidate_session_secret = effective.session_secret
+    if navidrome_url and (
+        not candidate_session_secret or len(candidate_session_secret) < 32
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Navidrome login requires a session secret with at least 32 characters",
+        )
+
+    values = {
+        "audio_format": payload.audio_format,
+        "filename_template": filename_template,
+        "organization_mode": payload.organization_mode,
+        "use_primary_artist": payload.use_primary_artist,
+        "web_playlist_name": playlist_name,
+        "gotify_url": gotify_url,
+        "cookie_mode": payload.cookie_mode,
+        "multi_user": payload.multi_user,
+        "allow_ugc": payload.allow_ugc,
+        "navidrome_url": navidrome_url,
+        "session_https_only": payload.session_https_only,
+        "listenbrainz_web": payload.listenbrainz_web,
+    }
+
+    if payload.clear_session_secret:
+        values["session_secret"] = None
+    elif new_session_secret is not None:
+        values["session_secret"] = new_session_secret
+    elif "session_secret" in existing_overrides:
+        values["session_secret"] = existing_overrides["session_secret"]
+
+    new_gotify_token = _clean_optional_setting(payload.gotify_token)
+    if payload.clear_gotify_token:
+        values["gotify_token"] = None
+    elif new_gotify_token is not None:
+        values["gotify_token"] = new_gotify_token
+    elif "gotify_token" in existing_overrides:
+        values["gotify_token"] = existing_overrides["gotify_token"]
+
     await asyncio.to_thread(save_settings, effective.data_dir, values)
     logger.info("Application settings updated by %s", _current_account_name(request))
     return {
@@ -1605,6 +2272,10 @@ async def api_playlist_status(http_request: Request):
 @app.get("/api/playlist/tracks")
 async def api_playlist_tracks(http_request: Request):
     """List tracks in the user's download playlist with metadata."""
+    import asyncio
+    import logging
+
+    logger = logging.getLogger(__name__)
     config = get_config()
     remote_user = _get_remote_user(http_request, config)
     playlist_name = config.effective_playlist_name(remote_user)
@@ -1777,18 +2448,6 @@ async def _warm_library_cache() -> None:
     try:
         _library_metadata_cache = await asyncio.to_thread(_build_library_cache_sync)
         logger.info("Warmed Local Files cache with %d files", len(_library_metadata_cache))
-        if queue_manager:
-            records = [
-                {
-                    "file_path": config.download_dir / entry_path,
-                    "modified_at": modified_at,
-                    "title": metadata.get("title"),
-                    "artist": metadata.get("artist"),
-                    "album": metadata.get("album"),
-                }
-                for entry_path, (modified_at, _size, metadata) in _library_metadata_cache.items()
-            ]
-            await queue_manager.restore_library_files(records)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -1907,12 +2566,55 @@ async def api_library_thumbnail(
     abs_path = _resolve_library_path(entry_path, config.download_dir)
     if not abs_path.exists() or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
-    if artwork := embedded_artwork(abs_path):
-        data, media_type = artwork
-        return Response(content=data, media_type=media_type)
-    if cover_path := folder_artwork(abs_path):
-        media_type = mimetypes.guess_type(cover_path.name)[0] or "image/jpeg"
-        return FileResponse(cover_path, media_type=media_type)
+    try:
+        from mutagen import File as MutagenFile
+        audio = MutagenFile(abs_path)
+        if audio is not None:
+            pictures = getattr(audio, "pictures", None)
+            if pictures:
+                picture = pictures[0]
+                return Response(content=picture.data, media_type=picture.mime or "image/jpeg")
+            if audio.tags:
+                for tag in audio.tags.values():
+                    if hasattr(tag, "data") and getattr(tag, "mime", "").startswith("image/"):
+                        return Response(content=tag.data, media_type=tag.mime)
+                covers = audio.tags.get("covr")
+                if covers:
+                    cover = covers[0] if isinstance(covers, list) else covers
+                    image_format = getattr(cover, "imageformat", None)
+                    media_type = "image/png" if image_format == 14 else "image/jpeg"
+                    return Response(content=bytes(cover), media_type=media_type)
+                encoded_pictures = audio.tags.get("metadata_block_picture")
+                if encoded_pictures:
+                    import base64
+                    from mutagen.flac import Picture
+
+                    encoded = (
+                        encoded_pictures[0]
+                        if isinstance(encoded_pictures, list)
+                        else encoded_pictures
+                    )
+                    picture = Picture(base64.b64decode(encoded))
+                    return Response(
+                        content=picture.data, media_type=picture.mime or "image/jpeg"
+                    )
+    except Exception:
+        pass
+
+    folder_files = {
+        child.name.casefold(): child
+        for child in abs_path.parent.iterdir()
+        if child.is_file()
+    }
+    for name in (
+        "cover.jpg", "cover.jpeg", "cover.png",
+        "folder.jpg", "folder.jpeg", "folder.png",
+        "front.jpg", "front.jpeg", "front.png",
+    ):
+        cover_path = folder_files.get(name)
+        if cover_path:
+            media_type = mimetypes.guess_type(cover_path.name)[0] or "image/jpeg"
+            return FileResponse(cover_path, media_type=media_type)
     raise HTTPException(status_code=404, detail="No embedded cover")
 
 
@@ -1924,9 +2626,5 @@ async def api_library_delete_file(
     """Delete a local audio file from disk."""
     _require_admin(request)
     rel_entry = _delete_downloaded_audio_file(entry_path)
-    if queue_manager:
-        await queue_manager.remove_jobs_for_file(
-            get_config().download_dir / rel_entry
-        )
     logger.info("Deleted library file: %s", rel_entry)
     return {"success": True, "message": f"Deleted: {rel_entry}"}
