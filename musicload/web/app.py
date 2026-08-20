@@ -7,6 +7,7 @@ import logging
 import mimetypes
 import re
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Awaitable, Callable
 
@@ -26,6 +27,7 @@ from musicload.queue import QueueManager
 from musicload.search import search
 from musicload.web.api_cache import TtlCache
 from musicload.web.image_proxy import ImageProxyService, validate_image_url
+from musicload.youtube_options import youtube_ydl_options
 
 app = FastAPI(title="Musicload", description="Search and download music from YouTube Music")
 logger = logging.getLogger(__name__)
@@ -57,7 +59,7 @@ _mood_playlists_cache = TtlCache(max_entries=25, ttl_seconds=1800)  # 30 min
 _charts_cache = TtlCache(max_entries=10, ttl_seconds=1800)        # 30 min
 _playlist_tracks_cache = TtlCache(max_entries=25, ttl_seconds=900)  # 15 min
 _new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
-_stream_url_cache = TtlCache(max_entries=50, ttl_seconds=300)      # 5 min
+_stream_candidate_cache = TtlCache(max_entries=50, ttl_seconds=300)  # 5 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -1381,14 +1383,73 @@ async def download_file(file_path: str):
 
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+_UPSTREAM_URL_RE = re.compile(r"https?://\S+")
+_PREVIEW_FIRST_BYTE_TIMEOUT = 20
+_PREVIEW_CANDIDATE_LIMIT = 8
 
 
-def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]]:
-    """Resolve one direct audio URL and the request headers it requires."""
+@dataclass(frozen=True)
+class _AudioStreamCandidate:
+    """One yt-dlp format candidate that ffmpeg can try server-side."""
+
+    url: str
+    http_headers: dict[str, str]
+    format_id: str
+    protocol: str
+    is_hls: bool
+
+
+def _format_quality(item: dict) -> float:
+    for key in ("abr", "tbr"):
+        try:
+            return float(item.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    return 0
+
+
+def _candidate_priority(item: dict) -> tuple[int, float]:
+    """Prefer token-free HLS and avoid downloading video when possible."""
+    url = str(item.get("url") or "")
+    protocol = str(item.get("protocol") or "").lower()
+    is_hls = "m3u8" in protocol or ".m3u8" in url.lower()
+    audio_only = item.get("vcodec") == "none"
+    if is_hls and audio_only:
+        group = 4
+    elif is_hls:
+        group = 3
+    elif audio_only:
+        group = 2
+    else:
+        group = 1
+    return group, _format_quality(item)
+
+
+def _safe_http_headers(item: dict, fallback: dict) -> dict[str, str]:
+    raw_headers = item.get("http_headers") or fallback or {}
+    return {
+        str(name): str(value)
+        for name, value in raw_headers.items()
+        if value is not None
+        and "\r" not in str(name)
+        and "\n" not in str(name)
+        and "\r" not in str(value)
+        and "\n" not in str(value)
+    }
+
+
+def _resolve_audio_candidates_sync(video_id: str) -> list[_AudioStreamCandidate]:
+    """Resolve multiple candidates so a rejected Google URL is not fatal."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
     youtube_url = f"https://music.youtube.com/watch?v={video_id}"
-    ydl_opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True}
+    ydl_opts = {
+        "format": "bestaudio/best",
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+    }
+    ydl_opts.update(youtube_ydl_options())
     info = extract_info_with_retry(
         ydl_opts=ydl_opts,
         url=youtube_url,
@@ -1396,54 +1457,129 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]
         cookie_file=config.cookie_file_path,
         config=config,
     )
-    selected_format = info
-    if "url" in info:
-        stream_url = info["url"]
-    else:
-        audio_formats = [
-            item
-            for item in info.get("formats", [])
-            if item.get("acodec") != "none" and item.get("url")
-        ]
-        if not audio_formats:
-            raise ValueError("No audio stream found")
-        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
-        stream_url = selected_format["url"]
-    protocol = selected_format.get("protocol") or info.get("protocol")
-    is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
-    raw_headers = selected_format.get("http_headers") or info.get("http_headers") or {}
-    http_headers = {
-        str(name): str(value)
-        for name, value in raw_headers.items()
-        if value is not None and "\r" not in str(name) and "\n" not in str(name)
-        and "\r" not in str(value) and "\n" not in str(value)
-    }
-    return stream_url, is_hls, http_headers
+
+    raw_formats: list[dict] = []
+    for key in ("requested_formats", "requested_downloads", "formats"):
+        value = info.get(key)
+        if isinstance(value, list):
+            raw_formats.extend(item for item in value if isinstance(item, dict))
+    if info.get("url"):
+        raw_formats.append(info)
+
+    fallback_headers = info.get("http_headers") or {}
+    candidates: list[_AudioStreamCandidate] = []
+    seen_urls: set[str] = set()
+    for item in sorted(raw_formats, key=_candidate_priority, reverse=True):
+        stream_url = str(item.get("url") or "")
+        if not stream_url or stream_url in seen_urls:
+            continue
+        if item.get("has_drm") or item.get("acodec") == "none":
+            continue
+        protocol = str(item.get("protocol") or info.get("protocol") or "unknown")
+        candidates.append(
+            _AudioStreamCandidate(
+                url=stream_url,
+                http_headers=_safe_http_headers(item, fallback_headers),
+                format_id=str(item.get("format_id") or "unknown")[:64],
+                protocol=protocol[:64],
+                is_hls="m3u8" in protocol.lower() or ".m3u8" in stream_url.lower(),
+            )
+        )
+        seen_urls.add(stream_url)
+        if len(candidates) >= _PREVIEW_CANDIDATE_LIMIT:
+            break
+
+    if not candidates:
+        raise ValueError("No usable audio stream candidates found")
+    return candidates
 
 
-async def _resolve_audio_stream(video_id: str) -> tuple[str, bool, dict[str, str]]:
+async def _resolve_audio_candidates(video_id: str) -> list[_AudioStreamCandidate]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    cached = _stream_url_cache.get(video_id)
+    cached = _stream_candidate_cache.get(video_id)
     if cached is not None:
         return cached
     try:
-        resolved = await asyncio.to_thread(_resolve_audio_stream_sync, video_id)
+        resolved = await asyncio.to_thread(_resolve_audio_candidates_sync, video_id)
     except Exception as error:
+        logger.warning(
+            "Failed to resolve preview candidates video_id=%s error=%s",
+            video_id,
+            type(error).__name__,
+        )
         raise HTTPException(status_code=502, detail="Failed to resolve audio stream") from error
-    _stream_url_cache.put(video_id, resolved)
+    _stream_candidate_cache.put(video_id, resolved)
     return resolved
+
+
+def _preview_error_summary(stderr: bytes) -> str:
+    message = stderr.decode(errors="replace").strip()
+    if not message:
+        return "ffmpeg returned no audio and no error message"
+    message = _UPSTREAM_URL_RE.sub("<upstream-url>", message)
+    return " ".join(message.split())[:800]
+
+
+async def _stop_preview_process(process: asyncio.subprocess.Process) -> None:
+    if process.returncode is None:
+        process.kill()
+    try:
+        await asyncio.wait_for(process.wait(), timeout=3)
+    except TimeoutError:
+        logger.warning("Timed out while stopping ffmpeg preview process")
+
+
+async def _start_preview_candidate(
+    candidate: _AudioStreamCandidate,
+) -> tuple[asyncio.subprocess.Process, bytes, asyncio.Task[bytes]] | None:
+    process = await asyncio.create_subprocess_exec(
+        *_preview_ffmpeg_command(candidate.url, candidate.http_headers),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    stderr_task = asyncio.create_task(process.stderr.read())
+    try:
+        first_chunk = await asyncio.wait_for(
+            process.stdout.read(16_384),
+            timeout=_PREVIEW_FIRST_BYTE_TIMEOUT,
+        )
+    except TimeoutError:
+        await _stop_preview_process(process)
+        stderr = await stderr_task
+        logger.warning(
+            "Preview candidate timed out format=%s protocol=%s error=%s",
+            candidate.format_id,
+            candidate.protocol,
+            _preview_error_summary(stderr),
+        )
+        return None
+
+    if first_chunk:
+        return process, first_chunk, stderr_task
+
+    await process.wait()
+    stderr = await stderr_task
+    logger.warning(
+        "Preview candidate failed format=%s protocol=%s exit_code=%s error=%s",
+        candidate.format_id,
+        candidate.protocol,
+        process.returncode,
+        _preview_error_summary(stderr),
+    )
+    return None
 
 
 @app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
 async def get_stream_url(video_id: str):
-    """Get a cached direct stream URL without blocking the event loop."""
-    stream_url, is_hls, _ = await _resolve_audio_stream(video_id)
+    """Keep API compatibility without exposing short-lived Google URLs."""
+    if not _VIDEO_ID_RE.fullmatch(video_id):
+        raise HTTPException(status_code=400, detail="Invalid video ID")
     return StreamUrlResponse(
         video_id=video_id,
-        url=stream_url,
-        expires_in=300,
-        is_hls=is_hls,
+        url=f"/api/preview/{video_id}",
+        expires_in=0,
+        is_hls=False,
     )
 
 
@@ -1454,33 +1590,71 @@ async def preview_audio(video_id: str):
     Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
     converts it to MP3 that browsers can play progressively.
     """
-    stream_url, _, http_headers = await _resolve_audio_stream(video_id)
+    candidates = await _resolve_audio_candidates(video_id)
+    for candidate in candidates:
+        started = await _start_preview_candidate(candidate)
+        if started is None:
+            continue
+        process, first_chunk, stderr_task = started
+        logger.info(
+            "Preview started video_id=%s format=%s protocol=%s hls=%s",
+            video_id,
+            candidate.format_id,
+            candidate.protocol,
+            candidate.is_hls,
+        )
 
-    cmd = _preview_ffmpeg_command(stream_url, http_headers)
+        async def stream_audio():
+            reached_eof = False
+            try:
+                yield first_chunk
+                while True:
+                    chunk = await process.stdout.read(16_384)
+                    if not chunk:
+                        reached_eof = True
+                        break
+                    yield chunk
+            finally:
+                await _stop_preview_process(process)
+                stderr = await stderr_task
+                if reached_eof and process.returncode not in (0, None):
+                    logger.warning(
+                        "Preview stream ended with error video_id=%s format=%s "
+                        "exit_code=%s error=%s",
+                        video_id,
+                        candidate.format_id,
+                        process.returncode,
+                        _preview_error_summary(stderr),
+                    )
 
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        return StreamingResponse(
+            stream_audio(),
+            media_type="audio/mpeg",
+            headers={
+                "Cache-Control": "no-store",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
+
+    _stream_candidate_cache.discard(video_id)
+    logger.error("All preview candidates failed video_id=%s", video_id)
+    raise HTTPException(
+        status_code=502,
+        detail="YouTube rejected every available audio stream; please try again",
     )
-
-    async def stream_audio():
-        try:
-            while True:
-                chunk = await process.stdout.read(8192)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            if process.returncode is None:
-                process.kill()
-
-    return StreamingResponse(stream_audio(), media_type="audio/mpeg")
 
 
 def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> list[str]:
     """Build the ffmpeg preview command, preserving yt-dlp request headers."""
-    cmd = ['ffmpeg', '-nostdin']
+    cmd = [
+        'ffmpeg',
+        '-nostdin',
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-reconnect', '1',
+        '-reconnect_streamed', '1',
+        '-reconnect_delay_max', '3',
+    ]
     if http_headers:
         ffmpeg_headers = "".join(
             f"{name}: {value}\r\n" for name, value in http_headers.items()
@@ -1488,10 +1662,11 @@ def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> li
         cmd.extend(['-headers', ffmpeg_headers])
     cmd.extend([
         '-i', stream_url,
+        '-map', '0:a:0',
         '-vn',
+        '-c:a', 'libmp3lame',
         '-f', 'mp3',
-        '-ab', '128k',
-        '-loglevel', 'error',
+        '-b:a', '128k',
         'pipe:1',
     ])
     return cmd

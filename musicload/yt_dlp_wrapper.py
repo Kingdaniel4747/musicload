@@ -200,14 +200,14 @@ def _retry_ambiguous_youtube_unavailable(
     alternate_url = _to_canonical_youtube_watch_url(url)
     strategies: list[tuple[str, str, dict[str, Any]]] = [
         (
-            "youtube_client_fallback_tv",
+            "youtube_client_fallback_hls",
             url,
-            _with_youtube_player_clients(ydl_opts, ["tv_simply", "tv_downgraded", "android", "web"]),
+            _with_youtube_player_clients(ydl_opts, ["web_safari", "tv", "web_embedded"]),
         ),
         (
-            "youtube_client_fallback_ios",
+            "youtube_client_fallback_tv",
             url,
-            _with_youtube_player_clients(ydl_opts, ["ios", "android", "web"]),
+            _with_youtube_player_clients(ydl_opts, ["tv_simply", "tv", "web_safari"]),
         ),
     ]
     if alternate_url:
@@ -218,7 +218,7 @@ def _retry_ambiguous_youtube_unavailable(
                     "youtube_canonical_url_tv_client_retry",
                     alternate_url,
                     _with_youtube_player_clients(
-                        ydl_opts, ["tv_simply", "tv_downgraded", "android", "web"]
+                        ydl_opts, ["web_safari", "tv", "web_embedded"]
                     ),
                 ),
             ]

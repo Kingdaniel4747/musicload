@@ -11,6 +11,7 @@ from musicload.library_index import find_existing_download, record_download
 from musicload.lyrics import get_lyrics_for_video, save_lyrics
 from musicload.tags import write_multi_artist_tags
 from musicload.unavailable import is_on_cooldown, is_unavailable_error, record_unavailable
+from musicload.youtube_options import youtube_ydl_options
 from musicload.yt_dlp_wrapper import extract_info_with_retry
 
 logger = logging.getLogger(__name__)
@@ -211,15 +212,8 @@ def _get_ydl_opts(
             "http": lambda n: min(2**n, 30),  # Cap at 30s
             "fragment": lambda n: min(2**n, 30),
         },
-        # Docker/minimal environments may cause yt-dlp to choose a narrower default
-        # YouTube client set. Pin a broader, cookie-free client mix for consistency.
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "web", "web_safari"],
-            }
-        },
-        "remote_components": ["ejs:github"],
     }
+    opts.update(youtube_ydl_options())
 
     # Note: cookies are now handled by yt_dlp_wrapper, not here
 

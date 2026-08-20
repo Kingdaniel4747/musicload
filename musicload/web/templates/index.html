@@ -527,6 +527,8 @@
       function stopCurrentAudio() {
         if (currentAudio) {
           currentAudio.pause();
+          currentAudio.removeAttribute("src");
+          currentAudio.load();
           currentAudio = null;
         }
         if (currentPlayingButton) {
@@ -565,52 +567,17 @@
         setPlaybackButtonState(button, "loading");
 
         try {
-          // KikuSan's proven playback path: play regular audio URLs directly
-          // and keep the server-side ffmpeg proxy for HLS/CORS fallbacks.
-          const response = await fetch(
-            `/api/stream-url/${encodeURIComponent(videoId)}`,
-            { cache: "no-store" },
-          );
-          const stream = await response.json().catch(() => ({}));
-          if (!response.ok) {
-            throw new Error(stream.detail || "Failed to get stream URL");
-          }
-          if (!stream.is_hls && !stream.url) {
-            throw new Error("No playable audio stream found");
-          }
-
           const audio = new Audio();
           audio.playsInline = true;
           audio.preload = "auto";
           currentAudio = audio;
           currentPlayingButton = button;
-          let sourceMode = stream.is_hls ? "preview" : "direct";
-          let fallbackPromise = null;
 
           const handlePlaybackFailure = (error) => {
             if (currentAudio !== audio) return;
             console.error("Audio playback error:", error);
             showStatus("Playback failed", true);
             stopCurrentAudio();
-          };
-
-          const startPreviewFallback = (reason) => {
-            if (fallbackPromise) return fallbackPromise;
-            if (currentAudio !== audio) {
-              return Promise.reject(new Error("Playback was stopped"));
-            }
-            sourceMode = "preview-starting";
-            fallbackPromise = (async () => {
-              console.warn("Direct playback failed; using server preview:", reason);
-              audio.pause();
-              audio.src = `/api/preview/${encodeURIComponent(videoId)}`;
-              audio.load();
-              await audio.play();
-              sourceMode = "preview";
-            })().finally(() => {
-              fallbackPromise = null;
-            });
-            return fallbackPromise;
           };
 
           audio.addEventListener("loadedmetadata", () => {
@@ -627,31 +594,14 @@
           });
 
           audio.addEventListener("error", (error) => {
-            if (currentAudio !== audio) return;
-            if (sourceMode === "direct") {
-              startPreviewFallback(error).catch(handlePlaybackFailure);
-              return;
-            }
-            if (sourceMode !== "preview-starting") {
-              handlePlaybackFailure(error);
-            }
+            handlePlaybackFailure(error);
           });
 
-          audio.src = stream.is_hls
-            ? `/api/preview/${encodeURIComponent(videoId)}`
-            : stream.url;
+          // Never expose a short-lived googlevideo URL to the browser. The
+          // server validates a working upstream before returning audio/mpeg.
+          audio.src = `/api/preview/${encodeURIComponent(videoId)}`;
           showMiniPlayer(button);
-          try {
-            await audio.play();
-          } catch (error) {
-            if (sourceMode === "preview-starting" && fallbackPromise) {
-              await fallbackPromise;
-            } else if (sourceMode === "direct") {
-              await startPreviewFallback(error);
-            } else {
-              throw error;
-            }
-          }
+          await audio.play();
           if (currentAudio !== audio) return;
           button.disabled = false;
           setPlayingVisual(true);

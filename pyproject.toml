@@ -5,7 +5,7 @@ description = "Search and download music from YouTube Music with lyrics"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "yt-dlp>=2025.12.8",
+    "yt-dlp[default]>=2026.8.4.234419.dev0",
     "ytmusicapi>=1.8.0",
     "fastapi>=0.115.0",
     "jinja2>=3.1.0",

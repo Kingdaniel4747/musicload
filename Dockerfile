@@ -1,5 +1,8 @@
 FROM ghcr.io/astral-sh/uv:latest@sha256:10902f58a1606787602f303954cea099626a4adb02acbac4c69920fe9d278f82 AS uv
 
+# yt-dlp uses a JavaScript runtime to solve YouTube's current EJS challenges.
+FROM denoland/deno:bin-2.9.5 AS deno
+
 FROM python:3.14-slim@sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456 AS builder
 
 COPY --from=uv /uv /usr/local/bin/uv
@@ -14,6 +17,8 @@ COPY musicload/ ./musicload/
 RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.14-slim@sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456 AS runtime
+
+COPY --from=deno /deno /usr/local/bin/deno
 
 # ffmpeg handles audio; tzdata supports per-user automatic download times;
 # gosu lets the entrypoint drop from root to the musicload user at runtime.
