@@ -124,8 +124,12 @@ function setPlayingVisual(isPlaying) {
 
 function stopCurrentAudio() {
   if (currentAudio) {
-    currentAudio.pause();
+    const audio = currentAudio;
     currentAudio = null;
+    window.clearTimeout(audio.playbackStartTimer);
+    audio.pause();
+    audio.removeAttribute("src");
+    audio.load();
   }
   if (currentPlayingButton) {
     currentPlayingButton.closest(".track")?.classList.remove("is-playing");
@@ -148,13 +152,87 @@ async function toggleMiniPlayer() {
 }
 
 document.getElementById("mini-player-toggle").addEventListener("click", () => {
-  toggleMiniPlayer().catch(() => showStatus("Playback failed", true));
+  const audio = currentAudio;
+  toggleMiniPlayer().catch((error) => {
+    if (!audio) return;
+    reportPlaybackFailure(
+      audio,
+      audio.playbackDebugId || createPlaybackDebugId(),
+      playbackClientErrorCode(error, audio.error),
+      error,
+    );
+  });
 });
 document.getElementById("mini-player-stop").addEventListener("click", stopCurrentAudio);
 
+function createPlaybackDebugId() {
+  if (window.crypto?.getRandomValues) {
+    const bytes = new Uint8Array(4);
+    window.crypto.getRandomValues(bytes);
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase();
+  }
+  return Math.random().toString(36).slice(2, 10).toUpperCase().padEnd(8, "0");
+}
+
+function playbackClientErrorCode(error, mediaError) {
+  if (error?.name === "NotAllowedError") return "P201";
+  if (error?.name === "NotSupportedError") return "P204";
+  const mediaCodes = {
+    1: "P210", // Playback was aborted by the browser.
+    2: "P211", // Browser/network transfer failed.
+    3: "P212", // Browser could not decode the audio.
+    4: "P213", // Browser rejected the source or format.
+  };
+  return mediaCodes[mediaError?.code] || "P299";
+}
+
+async function getServerPlaybackDiagnostic(debugId, fallbackCode) {
+  try {
+    const response = await fetch(`/api/preview-diagnostics/${debugId}`, {
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.code && data.code !== "P299") return data.code;
+  } catch (error) {
+    console.warn(`Playback diagnostic lookup failed [${debugId}]:`, error);
+  }
+  return fallbackCode;
+}
+
+async function reportPlaybackFailure(audio, debugId, fallbackCode, error) {
+  if (audio.playbackFailureReported) return;
+  audio.playbackFailureReported = true;
+  window.clearTimeout(audio.playbackStartTimer);
+  const mediaError = audio.error;
+  if (currentAudio === audio) stopCurrentAudio();
+  const code = await getServerPlaybackDiagnostic(debugId, fallbackCode);
+  console.error(`Audio playback failed [${debugId}/${code}]`, {
+    error,
+    mediaErrorCode: mediaError?.code || null,
+    mediaErrorMessage: mediaError?.message || "",
+    networkState: audio.networkState,
+    readyState: audio.readyState,
+  });
+  showStatus(`Playback failed (${code} · ${debugId})`, true);
+}
+
 async function togglePlay(videoId, button) {
   if (currentPlayingButton === button) {
-    await toggleMiniPlayer();
+    const audio = currentAudio;
+    try {
+      await toggleMiniPlayer();
+    } catch (error) {
+      if (audio) {
+        await reportPlaybackFailure(
+          audio,
+          audio.playbackDebugId || createPlaybackDebugId(),
+          playbackClientErrorCode(error, audio.error),
+          error,
+        );
+      }
+    }
     return;
   }
 
@@ -163,11 +241,22 @@ async function togglePlay(videoId, button) {
   setPlaybackButtonState(button, "loading");
 
   try {
+    const debugId = createPlaybackDebugId();
     const audio = new Audio();
     audio.playsInline = true;
     audio.preload = "auto";
+    audio.playbackDebugId = debugId;
     currentAudio = audio;
     currentPlayingButton = button;
+
+    audio.playbackStartTimer = window.setTimeout(() => {
+      if (currentAudio !== audio || !audio.paused) return;
+      reportPlaybackFailure(audio, debugId, "P206", new Error("Playback startup timed out"));
+    }, 30000);
+
+    audio.addEventListener("playing", () => {
+      window.clearTimeout(audio.playbackStartTimer);
+    });
 
     audio.addEventListener("loadedmetadata", () => {
       if (currentAudio !== audio) return;
@@ -182,16 +271,19 @@ async function togglePlay(videoId, button) {
       if (currentAudio === audio) stopCurrentAudio();
     });
 
-    audio.addEventListener("error", (e) => {
+    audio.addEventListener("error", (error) => {
       if (currentAudio !== audio) return;
-      console.error("Audio playback error:", e);
-      showStatus("Playback failed", true);
-      stopCurrentAudio();
+      reportPlaybackFailure(
+        audio,
+        debugId,
+        playbackClientErrorCode(null, audio.error),
+        error,
+      );
     });
 
     // Keep the expiring Google stream URL on the server. Direct browser
     // requests can lose yt-dlp's required headers and fail with HTTP 403.
-    audio.src = `/api/preview/${videoId}`;
+    audio.src = `/api/preview/${encodeURIComponent(videoId)}?debug_id=${debugId}`;
     showMiniPlayer(button);
     await audio.play();
     if (currentAudio !== audio) return;
@@ -200,8 +292,13 @@ async function togglePlay(videoId, button) {
     showMiniPlayer(button);
   } catch (error) {
     if (currentPlayingButton !== button) return;
-    console.error("Failed to play:", error);
-    showStatus("Failed to start playback: " + error.message, true);
-    stopCurrentAudio();
+    const audio = currentAudio;
+    if (!audio) return;
+    await reportPlaybackFailure(
+      audio,
+      audio.playbackDebugId || createPlaybackDebugId(),
+      playbackClientErrorCode(error, audio.error),
+      error,
+    );
   }
 }

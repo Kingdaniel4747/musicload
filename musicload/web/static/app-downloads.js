@@ -1,6 +1,22 @@
 // Queue Management
 let eventSource = null;
 let queueReconnectTimer = null;
+let queuePollTimer = null;
+let queueFetchInFlight = null;
+
+function queuePollDelay() {
+  if (document.hidden) return 15000;
+  const active = queueJobs.some((job) => ["queued", "downloading"].includes(job.status));
+  return currentTab === "downloads" || active ? 2000 : 5000;
+}
+
+function scheduleQueuePoll(delay = queuePollDelay()) {
+  if (queuePollTimer) window.clearTimeout(queuePollTimer);
+  queuePollTimer = window.setTimeout(() => {
+    queuePollTimer = null;
+    fetchQueue();
+  }, delay);
+}
 
 function initQueue() {
   if (eventSource) eventSource.close();
@@ -11,9 +27,15 @@ function initQueue() {
   eventSource = source;
 
   source.onmessage = (event) => {
-    const jobs = JSON.parse(event.data);
-    updateQueueUI(jobs);
+    try {
+      const jobs = JSON.parse(event.data);
+      updateQueueUI(jobs);
+    } catch (error) {
+      console.error("Invalid queue update:", error);
+    }
   };
+
+  source.onopen = () => fetchQueue();
 
   source.onerror = (error) => {
     if (eventSource !== source) return;
@@ -31,13 +53,29 @@ function initQueue() {
 }
 
 async function fetchQueue() {
-  try {
-    const response = await fetch("/api/queue/jobs");
-    const data = await response.json();
-    updateQueueUI(data.jobs);
-  } catch (error) {
-    console.error("Failed to fetch queue:", error);
-  }
+  if (queueFetchInFlight) return queueFetchInFlight;
+  queueFetchInFlight = (async () => {
+    try {
+      const response = await fetch("/api/queue/jobs", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !Array.isArray(data.jobs)) {
+        throw new Error(data.detail || `HTTP ${response.status}`);
+      }
+      updateQueueUI(data.jobs);
+    } catch (error) {
+      console.error("Failed to fetch queue:", error);
+    } finally {
+      queueFetchInFlight = null;
+      scheduleQueuePoll();
+    }
+  })();
+  return queueFetchInFlight;
+}
+
+function addOptimisticQueueJob(job) {
+  queueJobs = [job, ...queueJobs.filter((item) => item.id !== job.id)];
+  updateQueueUI(queueJobs);
+  scheduleQueuePoll(500);
 }
 
 function updateQueueUI(jobs) {
@@ -159,6 +197,9 @@ async function removeJob(jobId, deleteFile = false) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.detail || "Request failed");
     }
+    queueJobs = queueJobs.filter((job) => job.id !== jobId);
+    updateQueueUI(queueJobs);
+    scheduleQueuePoll(500);
   } catch (error) {
     console.error("Failed to remove job:", error);
     throw error;
@@ -171,6 +212,7 @@ async function cancelAllDownloads() {
   try {
     const response = await fetch("/api/queue/cancel-all", { method: "POST" });
     if (!response.ok) throw new Error("Cancellation failed");
+    await fetchQueue();
   } catch (error) {
     showStatus("Failed to cancel downloads", true);
   } finally {
@@ -182,6 +224,16 @@ document.getElementById("cancel-all-btn").addEventListener("click", cancelAllDow
 
 // Initialize queue on page load
 initQueue();
+
+window.addEventListener("pageshow", () => fetchQueue());
+window.addEventListener("focus", () => fetchQueue());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) {
+    scheduleQueuePoll();
+  } else {
+    fetchQueue();
+  }
+});
 
 // Reusable in-app confirmation dialog for destructive actions.
 const confirmModal = document.getElementById("confirm-modal");
@@ -258,7 +310,7 @@ document.getElementById("queue-list").addEventListener("click", async (event) =>
       button: clearButton,
       title: deleteFile ? "Delete downloaded file?" : "Clear download entry?",
       message: deleteFile
-        ? `Delete "${title}" permanently from your music folder? This cannot be undone.`
+        ? `Delete "${title}", its lyrics, and any folder left without another song? This cannot be undone.`
         : `Remove "${title}" from the download history?`,
       actionLabel: deleteFile ? "Delete File" : "Clear Entry",
       pendingLabel: deleteFile ? "Deleting..." : "Clearing...",

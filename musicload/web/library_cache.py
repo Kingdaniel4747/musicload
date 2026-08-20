@@ -60,6 +60,18 @@ def load_cached_files(data_dir: Path) -> dict[str, tuple[float, int, dict]]:
         connection.close()
 
 
+def delete_cached_file(data_dir: Path, entry_path: str) -> None:
+    """Remove one deleted Local Files entry from the persistent cache."""
+    connection = _connect(data_dir)
+    try:
+        connection.execute(
+            "DELETE FROM library_files WHERE entry_path = ?", (entry_path,)
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def replace_cached_files(
     data_dir: Path, entries: dict[str, tuple[float, int, dict]]
 ) -> None:

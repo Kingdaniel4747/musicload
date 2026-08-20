@@ -490,6 +490,7 @@ function setActiveTab(tab, skipExploreLoad = false) {
     downloadsResults.classList.add("active");
     resultTypeToggle.style.display = "none";
     updateQueueUI(queueJobs);
+    fetchQueue();
   } else if (tab === "listenbrainz" && listenbrainzResults) {
     listenbrainzResults.classList.add("active");
     resultTypeToggle.style.display = "none";
@@ -1280,6 +1281,21 @@ async function handleDownload(e) {
         return;
       }
       downloadAttention = true;
+      addOptimisticQueueJob({
+        id: data.job_id,
+        video_id: videoId,
+        title,
+        artist,
+        format,
+        status: "queued",
+        progress: 0,
+        speed: "Waiting",
+        eta: "",
+        error: null,
+        file_path: null,
+        created_at: new Date().toISOString(),
+        completed_at: null,
+      });
       btn.dataset.queueJobId = data.job_id;
       renderInlineDownload(btn, {
         id: data.job_id,

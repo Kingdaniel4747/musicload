@@ -75,6 +75,7 @@ _image_proxy: ImageProxyService | None = None
 
 # API response cache (TTL in seconds)
 _stream_url_cache = TtlCache(max_entries=50, ttl_seconds=300)      # 5 min
+_preview_diagnostics = TtlCache(max_entries=200, ttl_seconds=600)  # 10 min
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -213,7 +214,9 @@ def _get_remote_user(http_request: Request, config) -> str | None:
 async def startup_event():
     """Initialize queue manager and image proxy on startup."""
     global queue_manager, _image_proxy
-    queue_manager = QueueManager()
+    queue_manager = QueueManager(
+        history_path=config.data_dir / "download-history.json"
+    )
     await queue_manager.start()
     _image_proxy = ImageProxyService()
     for coroutine in (
@@ -802,31 +805,46 @@ def _resolve_downloaded_file_path(file_path: str, download_dir: Path) -> Path:
     return abs_requested
 
 
+def _remove_deleted_track_from_playlists(entry_path: str, download_dir: Path) -> None:
+    """Remove an exact deleted path from every root-level Musicload playlist."""
+    for playlist_path in download_dir.glob("*.m3u"):
+        try:
+            remove_from_m3u(entry_path, playlist_path.stem, download_dir)
+        except OSError as error:
+            logger.warning(
+                "Failed to remove deleted track from %s: %s", playlist_path, error
+            )
+
+
 def _delete_downloaded_audio_file(file_path: str) -> str:
-    """Delete one validated audio file and return its relative library path."""
+    """Delete an audio file, its sidecars, and directories left without songs."""
     from musicload.tagging import SUPPORTED_EXTENSIONS
 
-    download_dir = get_config().download_dir.resolve()
+    runtime_config = get_config()
+    download_dir = runtime_config.download_dir.resolve()
     abs_path = _resolve_downloaded_file_path(file_path, download_dir)
     if not abs_path.exists() or not abs_path.is_file():
         raise HTTPException(status_code=404, detail="File not found")
     if abs_path.suffix.lower() not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Not an audio file")
 
-    try:
-        abs_path.unlink()
-    except OSError as error:
-        logger.error("Failed to delete file %s: %s", abs_path, error)
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {error}")
-
-    parent = abs_path.parent
-    try:
-        if parent != download_dir and parent.exists() and not any(parent.iterdir()):
-            parent.rmdir()
-    except OSError:
-        pass
     relative_path = str(abs_path.relative_to(download_dir))
+    try:
+        from musicload.download_cleanup import delete_track_files
+
+        delete_track_files(abs_path, download_dir, SUPPORTED_EXTENSIONS)
+    except OSError as error:
+        logger.error("Failed to delete track files for %s: %s", abs_path, error)
+        raise HTTPException(status_code=500, detail=f"Failed to delete track: {error}")
+
+    _remove_deleted_track_from_playlists(relative_path, download_dir)
     _library_metadata_cache.pop(relative_path, None)
+    try:
+        from musicload.web.library_cache import delete_cached_file
+
+        delete_cached_file(runtime_config.data_dir, relative_path)
+    except OSError as error:
+        logger.warning("Could not remove Local Files cache entry %s: %s", relative_path, error)
     return relative_path
 
 
@@ -858,6 +876,61 @@ async def download_file(file_path: str):
 
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+_PLAYBACK_DEBUG_ID_RE = re.compile(r"^[A-Z0-9]{6,16}$")
+_PLAYBACK_ERROR_MESSAGES = {
+    "P100": "Invalid playback request",
+    "P301": "The audio source could not be resolved",
+    "P302": "The audio converter is unavailable",
+    "P303": "The audio source timed out",
+    "P304": "The audio converter produced no playable data",
+    "P305": "The audio stream ended unexpectedly",
+    "P399": "Unexpected preview error",
+}
+
+
+class _PlaybackPreviewError(RuntimeError):
+    """Internal preview failure with a stable, user-reportable error code."""
+
+    def __init__(self, code: str, technical_reason: str):
+        super().__init__(technical_reason)
+        self.code = code
+        self.technical_reason = technical_reason
+
+
+def _validated_playback_debug_id(debug_id: str | None) -> str | None:
+    if debug_id is None:
+        return None
+    normalized = debug_id.strip().upper()
+    if not _PLAYBACK_DEBUG_ID_RE.fullmatch(normalized):
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "P100", "message": _PLAYBACK_ERROR_MESSAGES["P100"]},
+        )
+    return normalized
+
+
+def _record_preview_failure(
+    debug_id: str | None,
+    video_id: str,
+    code: str,
+    technical_reason: str,
+) -> dict[str, str]:
+    """Correlate a short browser code with the detailed server-side log entry."""
+    payload = {
+        "code": code,
+        "message": _PLAYBACK_ERROR_MESSAGES.get(code, _PLAYBACK_ERROR_MESSAGES["P399"]),
+        "debug_id": debug_id or "SERVER",
+    }
+    if debug_id:
+        _preview_diagnostics.put(debug_id, payload)
+    logger.warning(
+        "Playback preview failed [%s/%s] for %s: %s",
+        debug_id or "SERVER",
+        code,
+        video_id,
+        technical_reason,
+    )
+    return payload
 
 
 def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]]:
@@ -929,14 +1002,49 @@ async def get_stream_url(video_id: str):
     )
 
 
+@app.get("/api/preview-diagnostics/{debug_id}")
+async def preview_diagnostics(debug_id: str):
+    """Return the short server-side failure code for one browser preview."""
+    normalized = _validated_playback_debug_id(debug_id)
+    diagnostic = _preview_diagnostics.get(normalized)
+    if diagnostic:
+        return diagnostic
+    return {
+        "code": "P299",
+        "message": "No server-side preview failure was recorded",
+        "debug_id": normalized,
+    }
+
+
 @app.get("/api/preview/{video_id}")
-async def preview_audio(video_id: str):
+async def preview_audio(
+    video_id: str,
+    debug_id: str | None = Query(None, max_length=16),
+):
     """Stream audio through Musicload instead of exposing the source URL.
 
     Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
     converts it to MP3 that browsers can play progressively.
     """
-    process, first_chunk = await _prepare_preview_process(video_id)
+    diagnostic_id = _validated_playback_debug_id(debug_id)
+    try:
+        process, first_chunk = await _prepare_preview_process(video_id)
+    except _PlaybackPreviewError as error:
+        detail = _record_preview_failure(
+            diagnostic_id, video_id, error.code, error.technical_reason
+        )
+        raise HTTPException(status_code=502, detail=detail) from error
+    except HTTPException as error:
+        detail = _record_preview_failure(
+            diagnostic_id, video_id, "P100", str(error.detail)
+        )
+        raise HTTPException(status_code=error.status_code, detail=detail) from error
+    except Exception as error:
+        detail = _record_preview_failure(
+            diagnostic_id, video_id, "P399", str(error)
+        )
+        logger.exception("Unexpected playback preview failure [%s]", diagnostic_id)
+        raise HTTPException(status_code=500, detail=detail) from error
 
     async def stream_audio():
         try:
@@ -949,6 +1057,12 @@ async def preview_audio(video_id: str):
             await process.wait()
             if process.returncode:
                 error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
+                _record_preview_failure(
+                    diagnostic_id,
+                    video_id,
+                    "P305",
+                    error[-500:] or f"ffmpeg exited with code {process.returncode}",
+                )
                 logger.warning(
                     "Audio preview ended early for %s (ffmpeg=%s): %s",
                     video_id,
@@ -969,19 +1083,38 @@ async def _prepare_preview_process(
     video_id: str,
 ) -> tuple[asyncio.subprocess.Process, bytes]:
     """Start ffmpeg and verify that it produces audio before returning HTTP 200."""
+    last_code = "P304"
     last_error = "no audio data"
     for attempt in range(2):
-        stream_url, _, http_headers = await _resolve_audio_stream(
-            video_id, refresh=attempt > 0
-        )
-        process = await asyncio.create_subprocess_exec(
-            *_preview_ffmpeg_command(stream_url, http_headers),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        try:
+            stream_url, _, http_headers = await _resolve_audio_stream(
+                video_id, refresh=attempt > 0
+            )
+        except HTTPException as error:
+            if error.status_code == 400:
+                raise
+            last_code = "P301"
+            last_error = str(error.__cause__ or error.detail)
+            logger.warning(
+                "Audio source resolution attempt %d failed for %s: %s",
+                attempt + 1,
+                video_id,
+                last_error,
+            )
+            continue
+
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *_preview_ffmpeg_command(stream_url, http_headers),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError as error:
+            raise _PlaybackPreviewError("P302", "ffmpeg executable was not found") from error
         try:
             first_chunk = await asyncio.wait_for(process.stdout.read(8192), timeout=20)
         except TimeoutError:
+            last_code = "P303"
             last_error = "ffmpeg produced no audio within 20 seconds"
             await _terminate_preview_process(process)
         else:
@@ -989,6 +1122,7 @@ async def _prepare_preview_process(
                 return process, first_chunk
             await process.wait()
             error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
+            last_code = "P304"
             last_error = error[-500:] or f"ffmpeg exited with code {process.returncode}"
 
         logger.warning(
@@ -998,14 +1132,17 @@ async def _prepare_preview_process(
             last_error,
         )
 
-    raise HTTPException(status_code=502, detail="Audio preview is unavailable")
+    raise _PlaybackPreviewError(last_code, last_error)
 
 
 async def _terminate_preview_process(process: asyncio.subprocess.Process) -> None:
     """Stop ffmpeg on disconnect and always reap the child process."""
     if process.returncode is not None:
         return
-    process.kill()
+    try:
+        process.kill()
+    except ProcessLookupError:
+        return
     try:
         await asyncio.wait_for(process.wait(), timeout=5)
     except TimeoutError:
@@ -1673,6 +1810,18 @@ async def _warm_library_cache() -> None:
     try:
         _library_metadata_cache = await asyncio.to_thread(_build_library_cache_sync)
         logger.info("Warmed Local Files cache with %d files", len(_library_metadata_cache))
+        if queue_manager:
+            records = [
+                {
+                    "file_path": config.download_dir / entry_path,
+                    "modified_at": modified_at,
+                    "title": metadata.get("title"),
+                    "artist": metadata.get("artist"),
+                    "album": metadata.get("album"),
+                }
+                for entry_path, (modified_at, _size, metadata) in _library_metadata_cache.items()
+            ]
+            await queue_manager.restore_library_files(records)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -1808,5 +1957,9 @@ async def api_library_delete_file(
     """Delete a local audio file from disk."""
     _require_admin(request)
     rel_entry = _delete_downloaded_audio_file(entry_path)
+    if queue_manager:
+        await queue_manager.remove_jobs_for_file(
+            get_config().download_dir / rel_entry
+        )
     logger.info("Deleted library file: %s", rel_entry)
     return {"success": True, "message": f"Deleted: {rel_entry}"}
