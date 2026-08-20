@@ -9,18 +9,23 @@ _FORMAT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
 
 def configure_process_file_logging(path: Path) -> None:
     """Append all Python logging output to a persistent process log."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    resolved = path.resolve()
     root = logging.getLogger()
-    for handler in root.handlers:
-        if isinstance(handler, logging.FileHandler):
-            if Path(handler.baseFilename).resolve() == resolved:
-                return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        resolved = path.resolve()
+        for handler in root.handlers:
+            if isinstance(handler, logging.FileHandler):
+                if Path(handler.baseFilename).resolve() == resolved:
+                    return
 
-    handler = logging.FileHandler(path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter(_FORMAT))
-    root.addHandler(handler)
-    root.setLevel(logging.INFO)
+        handler = logging.FileHandler(path, encoding="utf-8")
+        handler.setFormatter(logging.Formatter(_FORMAT))
+        root.addHandler(handler)
+        root.setLevel(logging.INFO)
+    except OSError as error:
+        # A log file must never prevent the web process from starting. Docker's
+        # entrypoint normally repairs /data; this also covers read-only setups.
+        root.warning("File logging disabled for %s: %s", path, error)
 
 
 def read_log_chunk(path: Path, offset: int, chunk_size: int = 512 * 1024) -> dict:

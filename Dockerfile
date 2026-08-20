@@ -15,9 +15,10 @@ RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.14-slim@sha256:6a27522252aef8432841f224d9baaa6e9fce07b07584154fa0b9a96603af7456 AS runtime
 
-# ffmpeg handles audio; tzdata supports per-user automatic download times.
+# ffmpeg handles audio; tzdata supports per-user automatic download times;
+# gosu drops root after bind-mount permissions have been repaired.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends ffmpeg tzdata && \
+    apt-get install -y --no-install-recommends ffmpeg gosu tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 ARG UID=1000
@@ -29,6 +30,7 @@ RUN groupadd -g ${GID} musicload && \
 
 WORKDIR /app
 COPY --from=builder --chown=musicload:musicload /app/.venv /app/.venv
+COPY --chmod=755 docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 ENV PATH="/app/.venv/bin:${PATH}" \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -38,10 +40,8 @@ ENV MUSICLOAD_DOWNLOAD_DIR=/downloads
 ENV MUSICLOAD_DATA_DIR=/data
 ENV MUSICLOAD_WEB_PORT=8000
 
-# Switch to non-root user
-USER musicload
-
 EXPOSE 8000
 
-# Run the web server without shipping the package manager in the final image.
+# Repair bind-mount ownership as root, then run the server as musicload.
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["musicload", "web", "--host", "0.0.0.0"]
