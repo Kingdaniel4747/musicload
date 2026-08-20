@@ -78,9 +78,18 @@ def save_settings(data_dir: Path, values: dict[str, Any]) -> Path:
         json.dumps(values, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
-    temporary.chmod(0o600)
+    # chmod is not supported by every bind-mounted or network filesystem used
+    # with Docker Desktop/NAS installations. The settings file must still be
+    # saved there; apply private permissions where the filesystem supports it.
+    try:
+        temporary.chmod(0o600)
+    except OSError:
+        pass
     temporary.replace(path)
-    path.chmod(0o600)
+    try:
+        path.chmod(0o600)
+    except OSError:
+        pass
     return path
 
 

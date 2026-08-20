@@ -196,7 +196,10 @@ def _get_remote_user(http_request: Request, config) -> str | None:
 async def startup_event():
     """Initialize queue manager and image proxy on startup."""
     global queue_manager, _image_proxy
-    queue_manager = QueueManager()
+    runtime_config = get_config()
+    queue_manager = QueueManager(
+        history_path=runtime_config.data_dir / "download-history.json"
+    )
     await queue_manager.start()
     _image_proxy = ImageProxyService()
     for coroutine in (
@@ -1332,6 +1335,7 @@ def _resolve_downloaded_file_path(file_path: str, download_dir: Path) -> Path:
 
 def _delete_downloaded_audio_file(file_path: str) -> str:
     """Delete one validated audio file and return its relative library path."""
+    from musicload.download_cleanup import delete_track_files
     from musicload.tagging import SUPPORTED_EXTENSIONS
 
     download_dir = get_config().download_dir.resolve()
@@ -1342,17 +1346,10 @@ def _delete_downloaded_audio_file(file_path: str) -> str:
         raise HTTPException(status_code=400, detail="Not an audio file")
 
     try:
-        abs_path.unlink()
+        delete_track_files(abs_path, download_dir, SUPPORTED_EXTENSIONS)
     except OSError as error:
-        logger.error("Failed to delete file %s: %s", abs_path, error)
-        raise HTTPException(status_code=500, detail=f"Failed to delete file: {error}")
-
-    parent = abs_path.parent
-    try:
-        if parent != download_dir and parent.exists() and not any(parent.iterdir()):
-            parent.rmdir()
-    except OSError:
-        pass
+        logger.error("Failed to delete track files for %s: %s", abs_path, error)
+        raise HTTPException(status_code=500, detail=f"Failed to delete track: {error}")
     relative_path = str(abs_path.relative_to(download_dir))
     _library_metadata_cache.pop(relative_path, None)
     return relative_path
@@ -1944,6 +1941,15 @@ def _clean_optional_setting(value: str | None) -> str | None:
     return cleaned or None
 
 
+def _apply_dynamic_runtime_settings() -> None:
+    """Apply saved settings that do not require rebuilding app middleware."""
+    from musicload.settings import RESTART_REQUIRED_SETTINGS, WEB_MANAGED_SETTINGS
+
+    refreshed = get_config()
+    for name in WEB_MANAGED_SETTINGS - RESTART_REQUIRED_SETTINGS:
+        setattr(config, name, getattr(refreshed, name))
+
+
 def _settings_response() -> dict:
     """Return effective values while redacting stored secrets."""
     from musicload.settings import RESTART_REQUIRED_SETTINGS, load_settings
@@ -2065,7 +2071,15 @@ async def api_save_settings(payload: AppSettingsRequest, request: Request):
     elif "gotify_token" in existing_overrides:
         values["gotify_token"] = existing_overrides["gotify_token"]
 
-    await asyncio.to_thread(save_settings, effective.data_dir, values)
+    try:
+        await asyncio.to_thread(save_settings, effective.data_dir, values)
+    except OSError as error:
+        logger.error("Could not save application settings: %s", error)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Could not write settings to {effective.data_dir}: {error}",
+        )
+    _apply_dynamic_runtime_settings()
     logger.info("Application settings updated by %s", _current_account_name(request))
     return {
         "success": True,
@@ -2082,10 +2096,11 @@ async def api_reset_settings(request: Request):
 
     effective = get_config()
     removed = await asyncio.to_thread(clear_settings, effective.data_dir)
+    _apply_dynamic_runtime_settings()
     return {
         "success": True,
         "removed": removed,
-        "message": "Web settings reset. Restart Musicload to apply environment defaults.",
+        "message": "Web settings reset. Restart Musicload only for options marked restart.",
     }
 
 
@@ -2448,6 +2463,22 @@ async def _warm_library_cache() -> None:
     try:
         _library_metadata_cache = await asyncio.to_thread(_build_library_cache_sync)
         logger.info("Warmed Local Files cache with %d files", len(_library_metadata_cache))
+        if queue_manager:
+            imported = await queue_manager.import_completed_files(
+                [
+                    {
+                        "file_path": str(config.download_dir / entry_path),
+                        "title": metadata.get("title") or Path(entry_path).stem,
+                        "artist": metadata.get("artist") or "Unknown artist",
+                        "format": Path(entry_path).suffix.lower().lstrip("."),
+                        "modified_at": modified_at,
+                    }
+                    for entry_path, (modified_at, _file_size, metadata)
+                    in _library_metadata_cache.items()
+                ]
+            )
+            if imported:
+                logger.info("Imported %d existing files into download history", imported)
     except asyncio.CancelledError:
         raise
     except Exception:
@@ -2626,5 +2657,9 @@ async def api_library_delete_file(
     """Delete a local audio file from disk."""
     _require_admin(request)
     rel_entry = _delete_downloaded_audio_file(entry_path)
+    if queue_manager:
+        await queue_manager.remove_jobs_for_file(
+            get_config().download_dir / rel_entry
+        )
     logger.info("Deleted library file: %s", rel_entry)
     return {"success": True, "message": f"Deleted: {rel_entry}"}

@@ -1983,18 +1983,43 @@
       // Queue Management
       let eventSource = null;
       let queueReconnectTimer = null;
+      let queuePollTimer = null;
+      let queueFetchInFlight = null;
+
+      function clearQueuePoll() {
+        if (!queuePollTimer) return;
+        clearTimeout(queuePollTimer);
+        queuePollTimer = null;
+      }
+
+      function scheduleQueuePoll(delay = 2000) {
+        clearQueuePoll();
+        queuePollTimer = setTimeout(() => {
+          queuePollTimer = null;
+          fetchQueue();
+        }, delay);
+      }
 
       function initQueue() {
         if (eventSource) eventSource.close();
         if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
+        clearQueuePoll();
 
         // Connect to SSE endpoint for real-time updates
         const source = new EventSource("/api/queue/stream");
         eventSource = source;
 
         source.onmessage = (event) => {
-          const jobs = JSON.parse(event.data);
-          updateQueueUI(jobs);
+          try {
+            const jobs = JSON.parse(event.data);
+            updateQueueUI(jobs);
+          } catch (error) {
+            console.error("Invalid queue update:", error);
+          }
+        };
+
+        source.onopen = () => {
+          if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
         };
 
         source.onerror = (error) => {
@@ -2002,6 +2027,8 @@
           console.error("SSE error:", error);
           source.close();
           eventSource = null;
+          fetchQueue();
+          scheduleQueuePoll();
           queueReconnectTimer = setTimeout(() => {
             queueReconnectTimer = null;
             initQueue();
@@ -2013,13 +2040,23 @@
       }
 
       async function fetchQueue() {
-        try {
-          const response = await fetch("/api/queue/jobs");
-          const data = await response.json();
-          updateQueueUI(data.jobs);
-        } catch (error) {
-          console.error("Failed to fetch queue:", error);
-        }
+        if (queueFetchInFlight) return queueFetchInFlight;
+        queueFetchInFlight = (async () => {
+          try {
+            const response = await fetch("/api/queue/jobs", { cache: "no-store" });
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || !Array.isArray(data.jobs)) {
+              throw new Error(data.detail || `HTTP ${response.status}`);
+            }
+            updateQueueUI(data.jobs);
+          } catch (error) {
+            console.error("Failed to fetch queue:", error);
+            scheduleQueuePoll(5000);
+          } finally {
+            queueFetchInFlight = null;
+          }
+        })();
+        return queueFetchInFlight;
       }
 
       function updateQueueUI(jobs) {
@@ -2029,6 +2066,16 @@
           (left, right) => new Date(right.created_at) - new Date(left.created_at),
         );
         queueJobs = jobs;
+        // Some reverse proxies keep the SSE connection open but buffer its
+        // events. Poll while work is active so queued/completed cards still
+        // appear without a page refresh; SSE remains the fast primary path.
+        if (jobs.some((job) => ["queued", "downloading"].includes(job.status))) {
+          scheduleQueuePoll(1500);
+        } else if (!eventSource) {
+          scheduleQueuePoll(5000);
+        } else {
+          clearQueuePoll();
+        }
         const shouldGlow = currentTab !== "downloads" && downloadAttention;
         document.getElementById("downloads-btn").classList.toggle(
           "download-active",
@@ -2315,7 +2362,7 @@
       }
 
       async function loadSettings() {
-        const response = await fetch("/api/settings");
+        const response = await fetch("/api/settings", { cache: "no-store" });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not load settings");
         populateSettings(data);
@@ -2398,7 +2445,12 @@
             body: JSON.stringify(payload),
           });
           const data = await response.json().catch(() => ({}));
-          if (!response.ok) throw new Error(data.detail || "Could not save settings");
+          if (!response.ok) {
+            const detail = Array.isArray(data.detail)
+              ? data.detail.map((item) => item.msg || String(item)).join(", ")
+              : data.detail;
+            throw new Error(detail || "Could not save settings");
+          }
           populateSettings(data);
           formatSelector.value = data.values.audio_format;
           localStorage.setItem("audioFormat", data.values.audio_format);

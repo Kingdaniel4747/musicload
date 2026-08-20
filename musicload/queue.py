@@ -1,10 +1,12 @@
 """Job queue manager for async downloads with real-time progress tracking."""
 
 import asyncio
+import json
 import logging
 import uuid
 from asyncio import Queue, Task
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from musicload.config import get_config
@@ -17,19 +19,101 @@ logger = logging.getLogger(__name__)
 class QueueManager:
     """Manages download job queue with async worker."""
 
-    def __init__(self, max_history: int = 100):
+    def __init__(
+        self,
+        max_history: int = 100,
+        history_path: Path | None = None,
+    ):
         """Initialize queue manager.
 
         Args:
             max_history: Maximum number of completed/failed jobs to keep in history
+            history_path: Optional JSON file used to retain finished jobs across restarts
         """
         self.queue: Queue[DownloadJob] = Queue()
         self.jobs: dict[str, DownloadJob] = {}
         self.worker_task: Optional[Task] = None
         self._running = False
         self._jobs_lock = asyncio.Lock()  # Protect concurrent access to self.jobs
+        self._history_write_lock = asyncio.Lock()
         self._cancelled_job_ids: set[str] = set()
         self.max_history = max_history
+        self.history_path = history_path
+        self._load_history()
+
+    def _load_history(self) -> None:
+        """Restore valid completed/failed jobs from the persistent history file."""
+        if not self.history_path or not self.history_path.exists():
+            return
+        try:
+            payload = json.loads(self.history_path.read_text(encoding="utf-8"))
+            if not isinstance(payload, list):
+                raise ValueError("download history must contain a list")
+            restored: list[DownloadJob] = []
+            for item in payload:
+                try:
+                    job = DownloadJob.model_validate(item)
+                except Exception:
+                    logger.warning("Ignoring an invalid download-history entry")
+                    continue
+                if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
+                    restored.append(job)
+            restored.sort(
+                key=lambda job: job.completed_at or job.created_at,
+                reverse=True,
+            )
+            self.jobs = {job.id: job for job in restored[: self.max_history]}
+            logger.info("Restored %d finished download jobs", len(self.jobs))
+        except (OSError, ValueError, json.JSONDecodeError):
+            logger.warning("Could not load download history", exc_info=True)
+
+    @staticmethod
+    def _write_history(path: Path, jobs: list[DownloadJob]) -> None:
+        """Atomically write finished jobs without requiring chmod support."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps(
+                [job.model_dump(mode="json") for job in jobs],
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        try:
+            temporary.chmod(0o600)
+        except OSError:
+            pass
+        temporary.replace(path)
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+
+    async def _persist_history(self) -> None:
+        """Persist a lock-consistent snapshot of finished jobs."""
+        if not self.history_path:
+            return
+        async with self._history_write_lock:
+            async with self._jobs_lock:
+                finished = [
+                    job.model_copy(deep=True)
+                    for job in self.jobs.values()
+                    if job.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+                ]
+            finished.sort(
+                key=lambda job: job.completed_at or job.created_at,
+                reverse=True,
+            )
+            try:
+                await asyncio.to_thread(
+                    self._write_history,
+                    self.history_path,
+                    finished[: self.max_history],
+                )
+            except OSError:
+                logger.exception("Could not persist download history")
 
     async def start(self):
         """Start the background worker."""
@@ -50,6 +134,7 @@ class QueueManager:
                 pass
         async with self._jobs_lock:
             self._cancelled_job_ids.clear()
+        await self._persist_history()
         logger.info("Queue manager stopped")
 
     async def add_job(
@@ -221,6 +306,7 @@ class QueueManager:
                 current_job.file_path = str(audio_path) if audio_path else None
                 current_job.completed_at = datetime.now()
                 current_job.progress = 100.0
+            await self._persist_history()
             if job.playlist_name and audio_path:
                 add_to_m3u([audio_path], job.playlist_name, config.download_dir)
             logger.info("Job completed: %s - %s (id=%s)", job.artist, job.title, job.id)
@@ -251,6 +337,7 @@ class QueueManager:
                 current_job.status = JobStatus.FAILED
                 current_job.error = str(e)
                 current_job.completed_at = datetime.now()
+            await self._persist_history()
             from musicload.notifications import send_download_notification
 
             await asyncio.to_thread(
@@ -287,6 +374,86 @@ class QueueManager:
         async with self._jobs_lock:
             return sorted(self.jobs.values(), key=lambda j: j.created_at, reverse=True)
 
+    async def import_completed_files(self, records: list[dict]) -> int:
+        """Add downloaded files missing from history, including pre-upgrade files."""
+        imported = 0
+        async with self._jobs_lock:
+            # Do not keep stale completed cards for files removed outside Musicload.
+            stale_ids = [
+                job.id
+                for job in self.jobs.values()
+                if job.status == JobStatus.COMPLETED
+                and job.file_path
+                and not Path(job.file_path).exists()
+            ]
+            for job_id in stale_ids:
+                del self.jobs[job_id]
+
+            existing_paths = {
+                str(Path(job.file_path).resolve())
+                for job in self.jobs.values()
+                if job.file_path
+            }
+            for record in sorted(
+                records,
+                key=lambda item: float(item.get("modified_at", 0)),
+                reverse=True,
+            ):
+                file_path = str(Path(record["file_path"]).resolve())
+                if file_path in existing_paths:
+                    continue
+                completed_at = datetime.fromtimestamp(
+                    float(record.get("modified_at", 0))
+                )
+                job_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"musicload:{file_path}"))
+                self.jobs[job_id] = DownloadJob(
+                    id=job_id,
+                    video_id="",
+                    title=str(record.get("title") or Path(file_path).stem),
+                    artist=str(record.get("artist") or "Unknown artist"),
+                    format=str(record.get("format") or Path(file_path).suffix.lstrip(".")),
+                    status=JobStatus.COMPLETED,
+                    progress=100.0,
+                    file_path=file_path,
+                    created_at=completed_at,
+                    completed_at=completed_at,
+                )
+                existing_paths.add(file_path)
+                imported += 1
+
+            finished = sorted(
+                (
+                    job
+                    for job in self.jobs.values()
+                    if job.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+                ),
+                key=lambda job: job.completed_at or job.created_at,
+                reverse=True,
+            )
+            for job in finished[self.max_history :]:
+                del self.jobs[job.id]
+
+        if imported or stale_ids:
+            await self._persist_history()
+        return imported
+
+    async def remove_jobs_for_file(self, file_path: Path) -> int:
+        """Remove completed history cards that point at one deleted file."""
+        resolved_path = str(file_path.resolve())
+        async with self._jobs_lock:
+            job_ids = [
+                job.id
+                for job in self.jobs.values()
+                if job.status == JobStatus.COMPLETED
+                and job.file_path
+                and str(Path(job.file_path).resolve()) == resolved_path
+            ]
+            for job_id in job_ids:
+                del self.jobs[job_id]
+        if job_ids:
+            await self._persist_history()
+        return len(job_ids)
+
     async def remove_job(self, job_id: str) -> bool:
         """
         Remove a job from the queue or clear if completed/failed.
@@ -297,6 +464,7 @@ class QueueManager:
         Returns:
             True if removed, False if not found
         """
+        removed = False
         async with self._jobs_lock:
             job = self.jobs.get(job_id)
             if not job:
@@ -307,22 +475,24 @@ class QueueManager:
                 del self.jobs[job_id]
                 self._cancelled_job_ids.discard(job_id)
                 logger.info("Cleared job: %s (id=%s)", job.status.value, job_id)
-                return True
+                removed = True
             elif job.status == JobStatus.QUEUED:
                 # Remove job immediately and mark its id so worker skips stale queue entry.
                 del self.jobs[job_id]
                 self._cancelled_job_ids.add(job_id)
                 logger.info("Cancelled and removed queued job (id=%s)", job_id)
-                return True
+                removed = True
 
             elif job.status == JobStatus.DOWNLOADING:
                 # The yt-dlp progress hook observes this flag and stops the
                 # active transfer at the next progress update.
                 self._cancelled_job_ids.add(job_id)
                 logger.info("Cancellation requested for active job (id=%s)", job_id)
-                return True
+                removed = True
 
-            return False
+        if removed:
+            await self._persist_history()
+        return removed
 
     async def cancel_all(self) -> int:
         """Cancel all queued and currently downloading jobs."""
@@ -374,6 +544,7 @@ class QueueManager:
                     num_to_remove,
                     self.max_history
                 )
+        await self._persist_history()
 
     async def get_stats(self) -> dict:
         """
