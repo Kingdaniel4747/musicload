@@ -177,6 +177,7 @@ function createPlaybackDebugId() {
 }
 
 function playbackClientErrorCode(error, mediaError) {
+  if (error?.playbackCode) return error.playbackCode;
   if (error?.name === "NotAllowedError") return "P201";
   if (error?.name === "NotSupportedError") return "P204";
   const mediaCodes = {
@@ -281,9 +282,29 @@ async function togglePlay(videoId, button) {
       );
     });
 
-    // Keep the expiring Google stream URL on the server. Direct browser
-    // requests can lose yt-dlp's required headers and fail with HTTP 403.
-    audio.src = `/api/preview/${encodeURIComponent(videoId)}?debug_id=${debugId}`;
+    // Musicload 1.0's reliable hybrid: normal audio goes straight from the
+    // source to the browser; only HLS uses the server-side FFmpeg fallback.
+    const response = await fetch(`/api/stream-url/${encodeURIComponent(videoId)}`, {
+      cache: "no-store",
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const resolutionError = new Error(data.detail?.message || "Failed to resolve playback source");
+      resolutionError.playbackCode = data.detail?.code || "P301";
+      throw resolutionError;
+    }
+
+    if (data.is_hls) {
+      audio.src = `/api/preview/${encodeURIComponent(videoId)}?debug_id=${debugId}`;
+      await new Promise((resolve, reject) => {
+        audio.addEventListener("canplay", resolve, { once: true });
+        audio.addEventListener("error", () => reject(new Error("HLS fallback failed")), {
+          once: true,
+        });
+      });
+    } else {
+      audio.src = data.url;
+    }
     showMiniPlayer(button);
     await audio.play();
     if (currentAudio !== audio) return;

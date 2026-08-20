@@ -6,7 +6,6 @@ import json
 import logging
 import mimetypes
 import re
-import secrets
 import urllib.parse
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -41,6 +40,7 @@ from musicload.web.schemas import (
     QueueAddAlbumRequest,
     QueueAddRequest,
     QueueAddResponse,
+    StreamUrlResponse,
 )
 from musicload.web.schemas import (
     track_to_response as _track_to_response,
@@ -73,10 +73,8 @@ _library_metadata_cache: dict[str, tuple[float, int, dict]] = {}
 # Global image proxy service
 _image_proxy: ImageProxyService | None = None
 
-# Playback diagnostics and one lock per requested video. Playback itself is
-# cached on disk so it remains valid across container restarts.
+# Playback diagnostics are kept only in memory for ten minutes.
 _preview_diagnostics = TtlCache(max_entries=200, ttl_seconds=600)  # 10 min
-_playback_cache_locks: dict[str, asyncio.Lock] = {}
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -878,12 +876,11 @@ async def download_file(file_path: str):
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _PLAYBACK_DEBUG_ID_RE = re.compile(r"^[A-Z0-9]{6,16}$")
-_PLAYBACK_CACHE_EXTENSIONS = (".m4a", ".mp4", ".webm", ".ogg", ".opus")
-_PLAYBACK_CACHE_MAX_FILES = 200
 _PLAYBACK_ERROR_MESSAGES = {
     "P100": "Invalid playback request",
-    "P401": "The playback file could not be downloaded",
-    "P402": "The playback download produced no audio file",
+    "P301": "The audio source could not be resolved",
+    "P304": "The fallback audio stream produced no playable data",
+    "P305": "The fallback audio stream ended unexpectedly",
     "P399": "Unexpected preview error",
 }
 
@@ -933,116 +930,67 @@ def _record_preview_failure(
     return payload
 
 
-def _playback_cache_dir() -> Path:
-    return get_config().data_dir / "playback-cache"
-
-
-def _playback_media_type(path: Path) -> str:
-    return {
-        ".m4a": "audio/mp4",
-        ".mp4": "audio/mp4",
-        ".webm": "audio/webm",
-        ".ogg": "audio/ogg",
-        ".opus": "audio/ogg",
-    }.get(path.suffix.lower(), "application/octet-stream")
-
-
-def _find_cached_playback_file(video_id: str) -> Path | None:
-    cache_dir = _playback_cache_dir()
-    for extension in _PLAYBACK_CACHE_EXTENSIONS:
-        candidate = cache_dir / f"{video_id}{extension}"
-        try:
-            if candidate.is_file() and candidate.stat().st_size > 0:
-                return candidate
-        except OSError:
-            continue
-    return None
-
-
-def _prune_playback_cache(keep: Path | None = None) -> None:
-    """Keep the private playback cache bounded without touching library files."""
-    cache_dir = _playback_cache_dir()
-    if not cache_dir.is_dir():
-        return
-    cached_files: list[Path] = []
-    for path in cache_dir.iterdir():
-        if (
-            path.is_file()
-            and _VIDEO_ID_RE.fullmatch(path.stem)
-            and path.suffix.lower() in _PLAYBACK_CACHE_EXTENSIONS
-        ):
-            cached_files.append(path)
-    cached_files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
-    for stale in cached_files[_PLAYBACK_CACHE_MAX_FILES:]:
-        if keep is None or stale != keep:
-            stale.unlink(missing_ok=True)
-
-
-def _download_playback_file(video_id: str) -> Path:
-    """Download browser-compatible source audio through yt-dlp, then publish atomically."""
+def _resolve_playback_stream_sync(video_id: str) -> tuple[str, bool]:
+    """Resolve playback exactly like Musicload 1.0: best audio, direct when possible."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
     runtime_config = get_config()
-    cache_dir = _playback_cache_dir()
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    token = secrets.token_hex(6)
-    temp_prefix = f".{video_id}-{token}"
-    output_template = cache_dir / f"{temp_prefix}.%(ext)s"
     options = {
-        "format": "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio[ext=webm]/bestaudio",
-        "outtmpl": str(output_template),
-        "noplaylist": True,
+        "format": "bestaudio/best",
         "quiet": True,
         "no_warnings": True,
-        "noprogress": True,
-        "retries": 3,
-        "fragment_retries": 3,
-        "socket_timeout": 30,
     }
-    try:
-        extract_info_with_retry(
-            ydl_opts=options,
-            url=f"https://music.youtube.com/watch?v={video_id}",
-            download=True,
-            cookie_file=runtime_config.cookie_file_path,
-            config=runtime_config,
-        )
-        candidates = [
-            path
-            for path in cache_dir.glob(f"{temp_prefix}.*")
-            if path.is_file()
-            and path.suffix.lower() in _PLAYBACK_CACHE_EXTENSIONS
-            and path.stat().st_size > 0
+    info = extract_info_with_retry(
+        ydl_opts=options,
+        url=f"https://music.youtube.com/watch?v={video_id}",
+        download=False,
+        cookie_file=runtime_config.cookie_file_path,
+        config=runtime_config,
+    )
+    selected_format = info
+    stream_url = info.get("url")
+    if not stream_url:
+        audio_formats = [
+            item
+            for item in info.get("formats", [])
+            if item.get("acodec") != "none" and item.get("url")
         ]
-        if not candidates:
-            raise _PlaybackPreviewError(
-                "P402", "yt-dlp completed without a supported audio output"
-            )
-        temporary = max(candidates, key=lambda path: path.stat().st_size)
-        final_path = cache_dir / f"{video_id}{temporary.suffix.lower()}"
-        temporary.replace(final_path)
-        _prune_playback_cache(keep=final_path)
-        return final_path
-    except _PlaybackPreviewError:
-        raise
-    except Exception as error:
-        raise _PlaybackPreviewError("P401", str(error)) from error
-    finally:
-        for temporary in cache_dir.glob(f"{temp_prefix}.*"):
-            if temporary.is_file():
-                temporary.unlink(missing_ok=True)
+        if not audio_formats:
+            raise ValueError("No audio stream found")
+        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
+        stream_url = selected_format["url"]
+    protocol = selected_format.get("protocol") or info.get("protocol") or ""
+    is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
+    return str(stream_url), is_hls
 
 
-async def _ensure_playback_file(video_id: str) -> Path:
+async def _resolve_playback_stream(video_id: str) -> tuple[str, bool]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
-    if cached := _find_cached_playback_file(video_id):
-        return cached
-    lock = _playback_cache_locks.setdefault(video_id, asyncio.Lock())
-    async with lock:
-        if cached := _find_cached_playback_file(video_id):
-            return cached
-        return await asyncio.to_thread(_download_playback_file, video_id)
+    try:
+        return await asyncio.to_thread(_resolve_playback_stream_sync, video_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        raise _PlaybackPreviewError("P301", str(error)) from error
+
+
+@app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
+async def get_stream_url(video_id: str):
+    """Return the old direct-browser stream URL and flag only HLS for fallback."""
+    try:
+        stream_url, is_hls = await _resolve_playback_stream(video_id)
+    except _PlaybackPreviewError as error:
+        raise HTTPException(
+            status_code=502,
+            detail={"code": error.code, "message": _PLAYBACK_ERROR_MESSAGES[error.code]},
+        ) from error
+    return StreamUrlResponse(
+        video_id=video_id,
+        url=stream_url,
+        expires_in=21600,
+        is_hls=is_hls,
+    )
 
 
 @app.get("/api/preview-diagnostics/{debug_id}")
@@ -1064,10 +1012,25 @@ async def preview_audio(
     video_id: str,
     debug_id: str | None = Query(None, max_length=16),
 ):
-    """Serve a locally cached source-audio file with native HTTP Range support."""
+    """Use the Musicload 1.0 FFmpeg stream only for the browser-incompatible HLS fallback."""
     diagnostic_id = _validated_playback_debug_id(debug_id)
     try:
-        playback_file = await _ensure_playback_file(video_id)
+        stream_url, _ = await _resolve_playback_stream(video_id)
+        process = await asyncio.create_subprocess_exec(
+            "ffmpeg",
+            "-i",
+            stream_url,
+            "-vn",
+            "-f",
+            "mp3",
+            "-ab",
+            "128k",
+            "-loglevel",
+            "error",
+            "pipe:1",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
     except _PlaybackPreviewError as error:
         detail = _record_preview_failure(
             diagnostic_id, video_id, error.code, error.technical_reason
@@ -1084,12 +1047,39 @@ async def preview_audio(
         )
         logger.exception("Unexpected playback preview failure [%s]", diagnostic_id)
         raise HTTPException(status_code=500, detail=detail) from error
-    return FileResponse(
-        path=playback_file,
-        media_type=_playback_media_type(playback_file),
+
+    async def stream_audio():
+        produced_audio = False
+        try:
+            while chunk := await process.stdout.read(8192):
+                produced_audio = True
+                yield chunk
+            return_code = await process.wait()
+            if not produced_audio:
+                _record_preview_failure(
+                    diagnostic_id,
+                    video_id,
+                    "P304",
+                    f"ffmpeg produced no audio bytes (exit {return_code})",
+                )
+            elif return_code != 0:
+                _record_preview_failure(
+                    diagnostic_id,
+                    video_id,
+                    "P305",
+                    f"ffmpeg stream ended with exit {return_code}",
+                )
+        finally:
+            if process.returncode is None:
+                process.kill()
+                await process.wait()
+
+    return StreamingResponse(
+        stream_audio(),
+        media_type="audio/mpeg",
         headers={
-            "Accept-Ranges": "bytes",
-            "Cache-Control": "private, max-age=86400",
+            "Cache-Control": "no-store",
+            "X-Accel-Buffering": "no",
             "X-Playback-Debug-ID": diagnostic_id or "SERVER",
         },
     )

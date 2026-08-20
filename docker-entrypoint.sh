@@ -2,7 +2,7 @@
 set -eu
 
 if [ "$(id -u)" = "0" ]; then
-    mkdir -p /data/logs /data/playback-cache
+    mkdir -p /data/logs
 
     # Docker creates a missing bind-mounted host directory as root. Repair only
     # the small application-data mount; never recursively chown the music tree.
