@@ -6,8 +6,12 @@ import json
 import logging
 import mimetypes
 import re
+import secrets
+import tempfile
+import time
 import urllib.parse
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import httpx
@@ -40,7 +44,6 @@ from musicload.web.schemas import (
     QueueAddAlbumRequest,
     QueueAddRequest,
     QueueAddResponse,
-    StreamUrlResponse,
 )
 from musicload.web.schemas import (
     track_to_response as _track_to_response,
@@ -75,6 +78,10 @@ _image_proxy: ImageProxyService | None = None
 
 # Playback diagnostics are kept only in memory for ten minutes.
 _preview_diagnostics = TtlCache(max_entries=200, ttl_seconds=600)  # 10 min
+_playback_temp_handle = tempfile.TemporaryDirectory(prefix="musicload-playback-")
+_playback_temp_dir = Path(_playback_temp_handle.name)
+_playback_sessions: dict[str, "_PlaybackSession"] = {}
+_playback_download_slots = asyncio.Semaphore(3)
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -222,6 +229,7 @@ async def startup_event():
         _warm_library_cache(),
         _warm_listenbrainz_caches(),
         _listenbrainz_scheduler(),
+        _playback_session_reaper(),
     ):
         task = asyncio.create_task(coroutine)
         _background_tasks.add(task)
@@ -239,6 +247,7 @@ async def shutdown_event():
         task.cancel()
     if _background_tasks:
         await asyncio.gather(*_background_tasks, return_exceptions=True)
+    _delete_all_playback_sessions()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -876,11 +885,13 @@ async def download_file(file_path: str):
 
 _VIDEO_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _PLAYBACK_DEBUG_ID_RE = re.compile(r"^[A-Z0-9]{6,16}$")
+_PLAYBACK_SESSION_RE = re.compile(r"^[a-f0-9]{24}$")
+_PLAYBACK_SESSION_TTL_SECONDS = 15 * 60
+_PLAYBACK_EXTENSIONS = (".m4a", ".mp4", ".webm", ".ogg", ".opus")
 _PLAYBACK_ERROR_MESSAGES = {
     "P100": "Invalid playback request",
-    "P301": "The audio source could not be resolved",
-    "P304": "The fallback audio stream produced no playable data",
-    "P305": "The fallback audio stream ended unexpectedly",
+    "P401": "The temporary playback audio could not be prepared",
+    "P402": "The playback preparation produced no playable audio file",
     "P399": "Unexpected preview error",
 }
 
@@ -892,6 +903,13 @@ class _PlaybackPreviewError(RuntimeError):
         super().__init__(technical_reason)
         self.code = code
         self.technical_reason = technical_reason
+
+
+@dataclass
+class _PlaybackSession:
+    video_id: str
+    path: Path
+    last_access: float
 
 
 def _validated_playback_debug_id(debug_id: str | None) -> str | None:
@@ -930,67 +948,104 @@ def _record_preview_failure(
     return payload
 
 
-def _resolve_playback_stream_sync(video_id: str) -> tuple[str, bool]:
-    """Resolve playback exactly like Musicload 1.0: best audio, direct when possible."""
+def _playback_media_type(path: Path) -> str:
+    return {
+        ".m4a": "audio/mp4",
+        ".mp4": "audio/mp4",
+        ".webm": "audio/webm",
+        ".ogg": "audio/ogg",
+        ".opus": "audio/ogg",
+    }.get(path.suffix.lower(), "application/octet-stream")
+
+
+def _delete_playback_file(path: Path) -> None:
+    """Delete only files owned by this process's private temporary directory."""
+    try:
+        if path.resolve().parent != _playback_temp_dir.resolve():
+            logger.error("Refused to delete playback path outside temporary directory: %s", path)
+            return
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        logger.warning("Could not delete temporary playback file %s: %s", path, error)
+
+
+def _delete_playback_session(session_id: str) -> None:
+    session = _playback_sessions.pop(session_id, None)
+    if session:
+        _delete_playback_file(session.path)
+
+
+def _delete_all_playback_sessions() -> None:
+    for session_id in list(_playback_sessions):
+        _delete_playback_session(session_id)
+
+
+def _expire_playback_sessions(now: float | None = None) -> int:
+    cutoff = (time.monotonic() if now is None else now) - _PLAYBACK_SESSION_TTL_SECONDS
+    expired = [
+        session_id
+        for session_id, session in _playback_sessions.items()
+        if session.last_access < cutoff
+    ]
+    for session_id in expired:
+        _delete_playback_session(session_id)
+    return len(expired)
+
+
+async def _playback_session_reaper() -> None:
+    """Remove abandoned sessions; normal playback deletes immediately on stop/end."""
+    while True:
+        await asyncio.sleep(60)
+        _expire_playback_sessions()
+
+
+def _prepare_playback_file_sync(video_id: str, session_id: str) -> Path:
+    """Download source audio only: no conversion, cover, tags, lyrics, or database."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
     runtime_config = get_config()
+    output_template = _playback_temp_dir / f"{session_id}.%(ext)s"
     options = {
-        "format": "bestaudio/best",
+        "format": "bestaudio[ext=m4a]/bestaudio[ext=mp4]/bestaudio[ext=webm]/bestaudio",
+        "outtmpl": str(output_template),
+        "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        "noprogress": True,
+        "retries": 3,
+        "fragment_retries": 3,
+        "socket_timeout": 30,
     }
-    info = extract_info_with_retry(
-        ydl_opts=options,
-        url=f"https://music.youtube.com/watch?v={video_id}",
-        download=False,
-        cookie_file=runtime_config.cookie_file_path,
-        config=runtime_config,
-    )
-    selected_format = info
-    stream_url = info.get("url")
-    if not stream_url:
-        audio_formats = [
-            item
-            for item in info.get("formats", [])
-            if item.get("acodec") != "none" and item.get("url")
-        ]
-        if not audio_formats:
-            raise ValueError("No audio stream found")
-        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
-        stream_url = selected_format["url"]
-    protocol = selected_format.get("protocol") or info.get("protocol") or ""
-    is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
-    return str(stream_url), is_hls
-
-
-async def _resolve_playback_stream(video_id: str) -> tuple[str, bool]:
-    if not _VIDEO_ID_RE.fullmatch(video_id):
-        raise HTTPException(status_code=400, detail="Invalid video ID")
+    prepared_path: Path | None = None
     try:
-        return await asyncio.to_thread(_resolve_playback_stream_sync, video_id)
-    except HTTPException:
+        extract_info_with_retry(
+            ydl_opts=options,
+            url=f"https://music.youtube.com/watch?v={video_id}",
+            download=True,
+            cookie_file=runtime_config.cookie_file_path,
+            config=runtime_config,
+        )
+        candidates = [
+            path
+            for path in _playback_temp_dir.glob(f"{session_id}.*")
+            if path.is_file()
+            and path.suffix.lower() in _PLAYBACK_EXTENSIONS
+            and path.stat().st_size > 0
+        ]
+        if not candidates:
+            raise _PlaybackPreviewError(
+                "P402", "yt-dlp completed without a supported audio output"
+            )
+        prepared_path = max(candidates, key=lambda path: path.stat().st_size)
+        return prepared_path
+    except _PlaybackPreviewError:
         raise
     except Exception as error:
-        raise _PlaybackPreviewError("P301", str(error)) from error
-
-
-@app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
-async def get_stream_url(video_id: str):
-    """Return the old direct-browser stream URL and flag only HLS for fallback."""
-    try:
-        stream_url, is_hls = await _resolve_playback_stream(video_id)
-    except _PlaybackPreviewError as error:
-        raise HTTPException(
-            status_code=502,
-            detail={"code": error.code, "message": _PLAYBACK_ERROR_MESSAGES[error.code]},
-        ) from error
-    return StreamUrlResponse(
-        video_id=video_id,
-        url=stream_url,
-        expires_in=21600,
-        is_hls=is_hls,
-    )
+        raise _PlaybackPreviewError("P401", str(error)) from error
+    finally:
+        for partial in _playback_temp_dir.glob(f"{session_id}.*"):
+            if partial != prepared_path:
+                _delete_playback_file(partial)
 
 
 @app.get("/api/preview-diagnostics/{debug_id}")
@@ -1007,82 +1062,80 @@ async def preview_diagnostics(debug_id: str):
     }
 
 
-@app.get("/api/preview/{video_id}")
-async def preview_audio(
+@app.post("/api/playback/prepare/{video_id}")
+async def prepare_playback(
     video_id: str,
     debug_id: str | None = Query(None, max_length=16),
 ):
-    """Use the Musicload 1.0 FFmpeg stream only for the browser-incompatible HLS fallback."""
+    """Prepare one raw audio file in process-private /tmp storage."""
     diagnostic_id = _validated_playback_debug_id(debug_id)
+    if not _VIDEO_ID_RE.fullmatch(video_id):
+        detail = _record_preview_failure(
+            diagnostic_id, video_id, "P100", "invalid video ID"
+        )
+        raise HTTPException(status_code=400, detail=detail)
+
+    session_id = secrets.token_hex(12)
     try:
-        stream_url, _ = await _resolve_playback_stream(video_id)
-        process = await asyncio.create_subprocess_exec(
-            "ffmpeg",
-            "-i",
-            stream_url,
-            "-vn",
-            "-f",
-            "mp3",
-            "-ab",
-            "128k",
-            "-loglevel",
-            "error",
-            "pipe:1",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        async with _playback_download_slots:
+            playback_file = await asyncio.to_thread(
+                _prepare_playback_file_sync, video_id, session_id
+            )
+        _playback_sessions[session_id] = _PlaybackSession(
+            video_id=video_id,
+            path=playback_file,
+            last_access=time.monotonic(),
         )
     except _PlaybackPreviewError as error:
         detail = _record_preview_failure(
             diagnostic_id, video_id, error.code, error.technical_reason
         )
         raise HTTPException(status_code=502, detail=detail) from error
-    except HTTPException as error:
-        detail = _record_preview_failure(
-            diagnostic_id, video_id, "P100", str(error.detail)
-        )
-        raise HTTPException(status_code=error.status_code, detail=detail) from error
     except Exception as error:
         detail = _record_preview_failure(
             diagnostic_id, video_id, "P399", str(error)
         )
         logger.exception("Unexpected playback preview failure [%s]", diagnostic_id)
         raise HTTPException(status_code=500, detail=detail) from error
-
-    async def stream_audio():
-        produced_audio = False
-        try:
-            while chunk := await process.stdout.read(8192):
-                produced_audio = True
-                yield chunk
-            return_code = await process.wait()
-            if not produced_audio:
-                _record_preview_failure(
-                    diagnostic_id,
-                    video_id,
-                    "P304",
-                    f"ffmpeg produced no audio bytes (exit {return_code})",
-                )
-            elif return_code != 0:
-                _record_preview_failure(
-                    diagnostic_id,
-                    video_id,
-                    "P305",
-                    f"ffmpeg stream ended with exit {return_code}",
-                )
-        finally:
-            if process.returncode is None:
-                process.kill()
-                await process.wait()
-
-    return StreamingResponse(
-        stream_audio(),
-        media_type="audio/mpeg",
+    return JSONResponse(
+        {
+            "session_id": session_id,
+            "url": f"/api/playback/file/{session_id}",
+            "expires_in": _PLAYBACK_SESSION_TTL_SECONDS,
+        },
         headers={
             "Cache-Control": "no-store",
-            "X-Accel-Buffering": "no",
             "X-Playback-Debug-ID": diagnostic_id or "SERVER",
         },
     )
+
+
+@app.get("/api/playback/file/{session_id}")
+async def playback_file(session_id: str):
+    """Serve the prepared file with native browser Range support."""
+    if not _PLAYBACK_SESSION_RE.fullmatch(session_id):
+        raise HTTPException(status_code=400, detail="Invalid playback session")
+    session = _playback_sessions.get(session_id)
+    if not session or not session.path.is_file():
+        raise HTTPException(status_code=404, detail="Playback session expired")
+    session.last_access = time.monotonic()
+    return FileResponse(
+        path=session.path,
+        media_type=_playback_media_type(session.path),
+        headers={
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "no-store",
+        },
+    )
+
+
+@app.delete("/api/playback/session/{session_id}", status_code=204)
+async def delete_playback_session(session_id: str):
+    """Delete a playback file immediately after stop, track change, or end."""
+    if not _PLAYBACK_SESSION_RE.fullmatch(session_id):
+        raise HTTPException(status_code=400, detail="Invalid playback session")
+    _delete_playback_session(session_id)
+    return Response(status_code=204)
 
 
 # Queue endpoints

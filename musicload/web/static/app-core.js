@@ -122,6 +122,21 @@ function setPlayingVisual(isPlaying) {
   toggle.title = isPlaying ? "Pause" : "Resume";
 }
 
+function releasePlaybackSessionId(sessionId) {
+  if (!sessionId) return;
+  fetch(`/api/playback/session/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+    keepalive: true,
+  }).catch((error) => console.warn("Temporary playback cleanup failed:", error));
+}
+
+function releasePlaybackSession(audio) {
+  if (!audio?.playbackSessionId) return;
+  const sessionId = audio.playbackSessionId;
+  audio.playbackSessionId = null;
+  releasePlaybackSessionId(sessionId);
+}
+
 function stopCurrentAudio() {
   if (currentAudio) {
     const audio = currentAudio;
@@ -130,6 +145,7 @@ function stopCurrentAudio() {
     audio.pause();
     audio.removeAttribute("src");
     audio.load();
+    releasePlaybackSession(audio);
   }
   if (currentPlayingButton) {
     currentPlayingButton.closest(".track")?.classList.remove("is-playing");
@@ -164,6 +180,9 @@ document.getElementById("mini-player-toggle").addEventListener("click", () => {
   });
 });
 document.getElementById("mini-player-stop").addEventListener("click", stopCurrentAudio);
+window.addEventListener("pagehide", () => {
+  if (currentAudio) releasePlaybackSession(currentAudio);
+});
 
 function createPlaybackDebugId() {
   if (window.crypto?.getRandomValues) {
@@ -282,29 +301,29 @@ async function togglePlay(videoId, button) {
       );
     });
 
-    // Musicload 1.0's reliable hybrid: normal audio goes straight from the
-    // source to the browser; only HLS uses the server-side FFmpeg fallback.
-    const response = await fetch(`/api/stream-url/${encodeURIComponent(videoId)}`, {
-      cache: "no-store",
-    });
+    // Prepare only the raw source audio in the container's private /tmp.
+    // There is no conversion, tagging, lyrics lookup, persistent cache, or database.
+    const response = await fetch(
+      `/api/playback/prepare/${encodeURIComponent(videoId)}?debug_id=${debugId}`,
+      {
+        method: "POST",
+        cache: "no-store",
+      },
+    );
     const data = await response.json().catch(() => ({}));
     if (!response.ok) {
-      const resolutionError = new Error(data.detail?.message || "Failed to resolve playback source");
-      resolutionError.playbackCode = data.detail?.code || "P301";
-      throw resolutionError;
+      const preparationError = new Error(
+        data.detail?.message || "Failed to prepare playback audio",
+      );
+      preparationError.playbackCode = data.detail?.code || "P401";
+      throw preparationError;
     }
-
-    if (data.is_hls) {
-      audio.src = `/api/preview/${encodeURIComponent(videoId)}?debug_id=${debugId}`;
-      await new Promise((resolve, reject) => {
-        audio.addEventListener("canplay", resolve, { once: true });
-        audio.addEventListener("error", () => reject(new Error("HLS fallback failed")), {
-          once: true,
-        });
-      });
-    } else {
-      audio.src = data.url;
+    if (currentAudio !== audio) {
+      releasePlaybackSessionId(data.session_id);
+      return;
     }
+    audio.playbackSessionId = data.session_id;
+    audio.src = data.url;
     showMiniPlayer(button);
     await audio.play();
     if (currentAudio !== audio) return;
