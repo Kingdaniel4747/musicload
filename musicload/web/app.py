@@ -7,7 +7,7 @@ import logging
 import mimetypes
 import re
 import urllib.parse
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 import httpx
@@ -880,10 +880,10 @@ _PLAYBACK_DEBUG_ID_RE = re.compile(r"^[A-Z0-9]{6,16}$")
 _PLAYBACK_ERROR_MESSAGES = {
     "P100": "Invalid playback request",
     "P301": "The audio source could not be resolved",
-    "P302": "The audio converter is unavailable",
     "P303": "The audio source timed out",
-    "P304": "The audio converter produced no playable data",
+    "P304": "The audio source produced no playable data",
     "P305": "The audio stream ended unexpectedly",
+    "P306": "The audio source rejected the proxy request",
     "P399": "Unexpected preview error",
 }
 
@@ -933,12 +933,40 @@ def _record_preview_failure(
     return payload
 
 
-def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]]:
+def _audio_media_type(selected_format: dict) -> str:
+    """Return a browser media type for one yt-dlp audio format."""
+    extension = str(
+        selected_format.get("audio_ext") or selected_format.get("ext") or ""
+    ).lower()
+    return {
+        "m4a": "audio/mp4",
+        "mp4": "audio/mp4",
+        "mp3": "audio/mpeg",
+        "ogg": "audio/ogg",
+        "opus": "audio/ogg",
+        "webm": "audio/webm",
+    }.get(extension, "application/octet-stream")
+
+
+def _resolve_audio_stream_sync(
+    video_id: str,
+) -> tuple[str, bool, dict[str, str], str]:
     """Resolve one direct audio URL and the request headers it requires."""
     from musicload.yt_dlp_wrapper import extract_info_with_retry
 
     youtube_url = f"https://music.youtube.com/watch?v={video_id}"
-    ydl_opts = {"format": "bestaudio/best", "quiet": True, "no_warnings": True}
+    ydl_opts = {
+        # Prefer a direct M4A stream because it works in Firefox, Chromium, and
+        # Safari. WebM remains a direct-stream fallback; manifests come last.
+        "format": (
+            "bestaudio[ext=m4a][protocol=https]/"
+            "bestaudio[ext=webm][protocol=https]/"
+            "bestaudio[protocol=https]/bestaudio/best"
+        ),
+        "noplaylist": True,
+        "quiet": True,
+        "no_warnings": True,
+    }
     info = extract_info_with_retry(
         ydl_opts=ydl_opts,
         url=youtube_url,
@@ -957,7 +985,18 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]
         ]
         if not audio_formats:
             raise ValueError("No audio stream found")
-        selected_format = max(audio_formats, key=lambda item: item.get("abr") or 0)
+        direct_formats = [
+            item for item in audio_formats if item.get("protocol") in {"http", "https"}
+        ]
+        candidates = direct_formats or audio_formats
+        extension_preference = {"m4a": 3, "mp4": 3, "webm": 2, "opus": 1}
+        selected_format = max(
+            candidates,
+            key=lambda item: (
+                extension_preference.get(str(item.get("ext", "")).lower(), 0),
+                item.get("abr") or 0,
+            ),
+        )
         stream_url = selected_format["url"]
     protocol = selected_format.get("protocol") or info.get("protocol")
     is_hls = protocol == "m3u8_native" or ".m3u8" in stream_url
@@ -968,12 +1007,12 @@ def _resolve_audio_stream_sync(video_id: str) -> tuple[str, bool, dict[str, str]
         if value is not None and "\r" not in str(name) and "\n" not in str(name)
         and "\r" not in str(value) and "\n" not in str(value)
     }
-    return stream_url, is_hls, http_headers
+    return stream_url, is_hls, http_headers, _audio_media_type(selected_format)
 
 
 async def _resolve_audio_stream(
     video_id: str, *, refresh: bool = False
-) -> tuple[str, bool, dict[str, str]]:
+) -> tuple[str, bool, dict[str, str], str]:
     if not _VIDEO_ID_RE.fullmatch(video_id):
         raise HTTPException(status_code=400, detail="Invalid video ID")
     if refresh:
@@ -993,7 +1032,7 @@ async def _resolve_audio_stream(
 @app.get("/api/stream-url/{video_id}", response_model=StreamUrlResponse)
 async def get_stream_url(video_id: str):
     """Get a cached direct stream URL without blocking the event loop."""
-    stream_url, is_hls, _ = await _resolve_audio_stream(video_id)
+    stream_url, is_hls, _, _ = await _resolve_audio_stream(video_id)
     return StreamUrlResponse(
         video_id=video_id,
         url=stream_url,
@@ -1018,17 +1057,23 @@ async def preview_diagnostics(debug_id: str):
 
 @app.get("/api/preview/{video_id}")
 async def preview_audio(
+    request: Request,
     video_id: str,
     debug_id: str | None = Query(None, max_length=16),
 ):
-    """Stream audio through Musicload instead of exposing the source URL.
-
-    Uses yt-dlp to resolve the stream URL and required headers, then ffmpeg
-    converts it to MP3 that browsers can play progressively.
-    """
+    """Proxy a direct browser-compatible audio stream with Range support."""
     diagnostic_id = _validated_playback_debug_id(debug_id)
+    range_header = request.headers.get("range")
+    if range_header and not re.fullmatch(r"bytes=\d*-\d*", range_header.strip()):
+        detail = _record_preview_failure(
+            diagnostic_id, video_id, "P100", f"invalid Range header: {range_header}"
+        )
+        raise HTTPException(status_code=416, detail=detail)
+
     try:
-        process, first_chunk = await _prepare_preview_process(video_id)
+        client, upstream, iterator, first_chunk, fallback_media_type = (
+            await _prepare_preview_proxy(video_id, range_header)
+        )
     except _PlaybackPreviewError as error:
         detail = _record_preview_failure(
             diagnostic_id, video_id, error.code, error.technical_reason
@@ -1049,126 +1094,150 @@ async def preview_audio(
     async def stream_audio():
         try:
             yield first_chunk
-            while True:
-                chunk = await process.stdout.read(8192)
-                if not chunk:
-                    break
+            async for chunk in iterator:
                 yield chunk
-            await process.wait()
-            if process.returncode:
-                error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
-                _record_preview_failure(
-                    diagnostic_id,
-                    video_id,
-                    "P305",
-                    error[-500:] or f"ffmpeg exited with code {process.returncode}",
-                )
-                logger.warning(
-                    "Audio preview ended early for %s (ffmpeg=%s): %s",
-                    video_id,
-                    process.returncode,
-                    error[-500:] or "no ffmpeg error output",
-                )
+        except asyncio.CancelledError:
+            raise
+        except httpx.HTTPError as error:
+            _record_preview_failure(
+                diagnostic_id, video_id, "P305", f"upstream stream failed: {error}"
+            )
         finally:
-            await _terminate_preview_process(process)
+            await upstream.aclose()
+            await client.aclose()
+
+    response_headers = {
+        "Cache-Control": "no-store",
+        "X-Accel-Buffering": "no",
+    }
+    for header_name in (
+        "accept-ranges",
+        "content-length",
+        "content-range",
+        "etag",
+        "last-modified",
+    ):
+        if header_value := upstream.headers.get(header_name):
+            response_headers[header_name.title()] = header_value
+    response_headers.setdefault("Accept-Ranges", "bytes")
+    upstream_media_type = upstream.headers.get("content-type", "").split(";", 1)[0].strip()
+    media_type = (
+        fallback_media_type
+        if upstream_media_type in {"", "application/octet-stream"}
+        else upstream_media_type
+    )
 
     return StreamingResponse(
         stream_audio(),
-        media_type="audio/mpeg",
-        headers={"Cache-Control": "no-store", "Accept-Ranges": "none"},
+        status_code=upstream.status_code,
+        media_type=media_type,
+        headers=response_headers,
     )
 
 
-async def _prepare_preview_process(
+async def _prepare_preview_proxy(
     video_id: str,
-) -> tuple[asyncio.subprocess.Process, bytes]:
-    """Start ffmpeg and verify that it produces audio before returning HTTP 200."""
+    range_header: str | None,
+) -> tuple[
+    httpx.AsyncClient,
+    httpx.Response,
+    AsyncIterator[bytes],
+    bytes,
+    str,
+]:
+    """Open and validate an upstream audio response before sending HTTP 200/206."""
     last_code = "P304"
-    last_error = "no audio data"
+    last_error = "upstream returned no audio data"
     for attempt in range(2):
+        client: httpx.AsyncClient | None = None
+        upstream: httpx.Response | None = None
+        keep_open = False
         try:
-            stream_url, _, http_headers = await _resolve_audio_stream(
+            stream_url, is_hls, http_headers, media_type = await _resolve_audio_stream(
                 video_id, refresh=attempt > 0
             )
+            if is_hls:
+                last_code = "P306"
+                last_error = "yt-dlp selected a manifest instead of a direct audio stream"
+                continue
+
+            blocked_headers = {
+                "accept-encoding",
+                "connection",
+                "content-length",
+                "host",
+                "transfer-encoding",
+            }
+            request_headers = {
+                name: value
+                for name, value in http_headers.items()
+                if name.casefold() not in blocked_headers
+            }
+            request_headers["Accept-Encoding"] = "identity"
+            if range_header:
+                request_headers["Range"] = range_header.strip()
+
+            client = httpx.AsyncClient(
+                follow_redirects=True,
+                timeout=httpx.Timeout(30.0, connect=15.0),
+            )
+            upstream_request = client.build_request(
+                "GET", stream_url, headers=request_headers
+            )
+            upstream = await client.send(upstream_request, stream=True)
+            if upstream.status_code not in {200, 206}:
+                error_body = (await upstream.aread())[:500].decode(
+                    "utf-8", errors="replace"
+                )
+                last_code = "P306"
+                last_error = (
+                    f"upstream HTTP {upstream.status_code}: "
+                    f"{error_body or 'empty error response'}"
+                )
+                _stream_url_cache.discard(video_id)
+                continue
+
+            iterator = upstream.aiter_raw(chunk_size=64 * 1024)
+            try:
+                first_chunk = await asyncio.wait_for(anext(iterator), timeout=20)
+            except StopAsyncIteration:
+                last_code = "P304"
+                last_error = "upstream response contained no audio bytes"
+                continue
+            if not first_chunk:
+                last_code = "P304"
+                last_error = "upstream response contained an empty first audio chunk"
+                continue
+            keep_open = True
+            return client, upstream, iterator, first_chunk, media_type
         except HTTPException as error:
             if error.status_code == 400:
                 raise
             last_code = "P301"
             last_error = str(error.__cause__ or error.detail)
-            logger.warning(
-                "Audio source resolution attempt %d failed for %s: %s",
-                attempt + 1,
-                video_id,
-                last_error,
-            )
-            continue
-
-        try:
-            process = await asyncio.create_subprocess_exec(
-                *_preview_ffmpeg_command(stream_url, http_headers),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except FileNotFoundError as error:
-            raise _PlaybackPreviewError("P302", "ffmpeg executable was not found") from error
-        try:
-            first_chunk = await asyncio.wait_for(process.stdout.read(8192), timeout=20)
-        except TimeoutError:
+        except (TimeoutError, httpx.TimeoutException) as error:
             last_code = "P303"
-            last_error = "ffmpeg produced no audio within 20 seconds"
-            await _terminate_preview_process(process)
-        else:
-            if first_chunk:
-                return process, first_chunk
-            await process.wait()
-            error = (await process.stderr.read()).decode("utf-8", errors="replace").strip()
-            last_code = "P304"
-            last_error = error[-500:] or f"ffmpeg exited with code {process.returncode}"
+            last_error = f"upstream audio request timed out: {error}"
+            _stream_url_cache.discard(video_id)
+        except httpx.HTTPError as error:
+            last_code = "P306"
+            last_error = f"upstream audio request failed: {error}"
+            _stream_url_cache.discard(video_id)
+        finally:
+            if not keep_open:
+                if upstream is not None:
+                    await upstream.aclose()
+                if client is not None:
+                    await client.aclose()
 
         logger.warning(
-            "Audio preview attempt %d failed for %s: %s",
+            "Audio proxy attempt %d failed for %s: %s",
             attempt + 1,
             video_id,
             last_error,
         )
 
     raise _PlaybackPreviewError(last_code, last_error)
-
-
-async def _terminate_preview_process(process: asyncio.subprocess.Process) -> None:
-    """Stop ffmpeg on disconnect and always reap the child process."""
-    if process.returncode is not None:
-        return
-    try:
-        process.kill()
-    except ProcessLookupError:
-        return
-    try:
-        await asyncio.wait_for(process.wait(), timeout=5)
-    except TimeoutError:
-        logger.warning("Timed out while stopping audio preview process")
-
-
-def _preview_ffmpeg_command(stream_url: str, http_headers: dict[str, str]) -> list[str]:
-    """Build the ffmpeg preview command, preserving yt-dlp request headers."""
-    cmd = ['ffmpeg', '-nostdin']
-    if http_headers:
-        ffmpeg_headers = "".join(
-            f"{name}: {value}\r\n" for name, value in http_headers.items()
-        )
-        cmd.extend(['-headers', ffmpeg_headers])
-    cmd.extend([
-        '-reconnect', '1',
-        '-reconnect_streamed', '1',
-        '-reconnect_delay_max', '5',
-        '-i', stream_url,
-        '-vn',
-        '-f', 'mp3',
-        '-ab', '128k',
-        '-loglevel', 'error',
-        'pipe:1',
-    ])
-    return cmd
 
 
 # Queue endpoints

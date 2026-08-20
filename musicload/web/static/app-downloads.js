@@ -3,24 +3,29 @@ let eventSource = null;
 let queueReconnectTimer = null;
 let queuePollTimer = null;
 let queueFetchInFlight = null;
+let queueReconnectDelay = 2000;
 
-function queuePollDelay() {
-  if (document.hidden) return 15000;
-  const active = queueJobs.some((job) => ["queued", "downloading"].includes(job.status));
-  return currentTab === "downloads" || active ? 2000 : 5000;
+function clearQueuePoll() {
+  if (!queuePollTimer) return;
+  window.clearTimeout(queuePollTimer);
+  queuePollTimer = null;
 }
 
-function scheduleQueuePoll(delay = queuePollDelay()) {
-  if (queuePollTimer) window.clearTimeout(queuePollTimer);
+function scheduleQueueFallbackPoll(delay = 10000) {
+  clearQueuePoll();
   queuePollTimer = window.setTimeout(() => {
     queuePollTimer = null;
-    fetchQueue();
+    if (eventSource) return;
+    fetchQueue().finally(() => {
+      if (!eventSource) scheduleQueueFallbackPoll();
+    });
   }, delay);
 }
 
 function initQueue() {
   if (eventSource) eventSource.close();
   if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
+  clearQueuePoll();
 
   // Connect to SSE endpoint for real-time updates
   const source = new EventSource("/api/queue/stream");
@@ -35,17 +40,24 @@ function initQueue() {
     }
   };
 
-  source.onopen = () => fetchQueue();
+  source.onopen = () => {
+    queueReconnectDelay = 2000;
+    clearQueuePoll();
+  };
 
   source.onerror = (error) => {
     if (eventSource !== source) return;
     console.error("SSE error:", error);
     source.close();
     eventSource = null;
+    fetchQueue();
+    scheduleQueueFallbackPoll();
+    const reconnectAfter = queueReconnectDelay;
+    queueReconnectDelay = Math.min(queueReconnectDelay * 2, 30000);
     queueReconnectTimer = setTimeout(() => {
       queueReconnectTimer = null;
       initQueue();
-    }, 5000);
+    }, reconnectAfter);
   };
 
   // Load initial queue
@@ -66,7 +78,6 @@ async function fetchQueue() {
       console.error("Failed to fetch queue:", error);
     } finally {
       queueFetchInFlight = null;
-      scheduleQueuePoll();
     }
   })();
   return queueFetchInFlight;
@@ -75,7 +86,6 @@ async function fetchQueue() {
 function addOptimisticQueueJob(job) {
   queueJobs = [job, ...queueJobs.filter((item) => item.id !== job.id)];
   updateQueueUI(queueJobs);
-  scheduleQueuePoll(500);
 }
 
 function updateQueueUI(jobs) {
@@ -199,7 +209,6 @@ async function removeJob(jobId, deleteFile = false) {
     }
     queueJobs = queueJobs.filter((job) => job.id !== jobId);
     updateQueueUI(queueJobs);
-    scheduleQueuePoll(500);
   } catch (error) {
     console.error("Failed to remove job:", error);
     throw error;
@@ -226,13 +235,8 @@ document.getElementById("cancel-all-btn").addEventListener("click", cancelAllDow
 initQueue();
 
 window.addEventListener("pageshow", () => fetchQueue());
-window.addEventListener("focus", () => fetchQueue());
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) {
-    scheduleQueuePoll();
-  } else {
-    fetchQueue();
-  }
+  if (!document.hidden) fetchQueue();
 });
 
 // Reusable in-app confirmation dialog for destructive actions.
