@@ -1270,7 +1270,7 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   .search-form button[type="submit"]::after {
     display: block;
     line-height: 1;
-    transform: translateY(-5px);
+    transform: translateY(-7px);
   }
   .format-modal { padding: .5rem; }
   .format-modal-content { max-height: calc(100dvh - 1rem); }
