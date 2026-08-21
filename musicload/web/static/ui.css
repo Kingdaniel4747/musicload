@@ -1156,6 +1156,8 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   justify-content: space-between;
   gap: .45rem;
   cursor: pointer;
+  font-size: .9rem;
+  font-weight: 700;
   white-space: nowrap;
 }
 .format-selector-button:hover {
@@ -1201,8 +1203,8 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   box-shadow: inset 3px 0 0 var(--accent-primary);
 }
 .format-option > span:first-child { display: grid; gap: .18rem; min-width: 0; }
-.format-option strong { font-size: .9rem; }
-.format-option small { color: var(--text-secondary); font-size: .75rem; font-weight: 500; }
+.format-option strong { font-size: .98rem; }
+.format-option small { color: var(--text-secondary); font-size: .8rem; font-weight: 500; }
 .format-option-check {
   display: grid;
   place-items: center;
@@ -1237,13 +1239,29 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   transform: translateY(-2px);
 }
 
+/* Downloads: cards sit directly on the page instead of inside a grey panel. */
+.downloads-section .queue-section {
+  margin: .25rem 0 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+.downloads-section .queue-header { margin: 0 0 1rem !important; }
+.downloads-section .queue-list { gap: .75rem; }
+.downloads-section .job-card {
+  padding: 1.15rem;
+  border-radius: 14px;
+}
+
 @media (max-width: 720px) {
   .search-form .format-selector-button {
     display: flex !important;
     width: 4.85rem;
     min-width: 4.85rem;
     padding: 0 .55rem 0 .65rem;
-    font-size: .68rem;
+    font-size: .78rem;
   }
   .search-form button[type="submit"] {
     display: grid;
@@ -1252,7 +1270,7 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   .search-form button[type="submit"]::after {
     display: block;
     line-height: 1;
-    transform: translateY(-2px);
+    transform: translateY(-5px);
   }
   .format-modal { padding: .5rem; }
   .format-modal-content { max-height: calc(100dvh - 1rem); }
@@ -1272,7 +1290,7 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
     min-width: 0;
     overflow-x: hidden;
   }
-  .job-card { padding: .85rem; }
+  .job-card { padding: 1rem; }
   .job-header {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) auto;
