@@ -839,6 +839,11 @@ button:active, .download-file-btn:active { transform: translateY(0) scale(.98); 
     border-radius: 0 !important;
     background: transparent !important;
   }
+  .mini-player-toggle[data-playback-state="pause"] {
+    border-radius: 50% !important;
+    background: var(--accent-primary) !important;
+    box-shadow: 0 8px 22px rgba(214, 9, 50, .32) !important;
+  }
   #library-results .explore-playlist-header.library-header {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) auto !important;
@@ -1236,7 +1241,7 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
 .mini-player-stop > span {
   display: block;
   line-height: 1;
-  transform: translateY(-2px);
+  transform: translateY(0px);
 }
 
 /* Downloads: cards sit directly on the page instead of inside a grey panel. */
@@ -1270,7 +1275,7 @@ button, a, input, select, textarea, label { touch-action: manipulation; }
   .search-form button[type="submit"]::after {
     display: block;
     line-height: 1;
-    transform: translateY(-7px);
+    transform: translateY(-8px);
   }
   .format-modal { padding: .5rem; }
   .format-modal-content { max-height: calc(100dvh - 1rem); }
