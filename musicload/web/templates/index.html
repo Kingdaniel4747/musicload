@@ -13,7 +13,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/ui.css?v=settings-duplicates-2" />
+    <link rel="stylesheet" href="/static/ui.css?v=visual-polish-3" />
   </head>
   <body>
     <div class="container">
@@ -104,14 +104,26 @@
       <form id="search-form" class="search-form">
         <select
           id="format-selector"
-          class="format-selector"
+          class="format-selector-native"
           aria-label="Audio format"
-          title="Audio format"
+          aria-hidden="true"
+          tabindex="-1"
         >
           <option value="opus">Opus</option>
           <option value="mp3">MP3</option>
           <option value="flac">FLAC</option>
         </select>
+        <button
+          id="format-selector-button"
+          class="format-selector format-selector-button"
+          type="button"
+          aria-label="Choose audio format"
+          aria-haspopup="dialog"
+          aria-controls="format-modal"
+        >
+          <span id="format-selector-label">Opus</span>
+          <span class="format-selector-chevron" aria-hidden="true">⌄</span>
+        </button>
         <div class="search-input-wrapper">
           <input
             type="text"
@@ -204,7 +216,7 @@
         <span id="mini-player-artist" class="mini-player-artist mini-player-text-line"></span>
       </div>
       <button id="mini-player-toggle" class="mini-player-toggle" aria-label="Pause playback" title="Pause"></button>
-      <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop">×</button>
+      <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop"><span aria-hidden="true">×</span></button>
     </div>
 
     <nav class="mobile-nav{% if listenbrainz_enabled and is_admin %} mobile-nav-four{% elif listenbrainz_enabled or is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
@@ -399,6 +411,34 @@
       </div>
     </div>
 
+    <div id="format-modal" class="modal format-modal" role="dialog" aria-modal="true" aria-labelledby="format-modal-title">
+      <div class="modal-content format-modal-content">
+        <div class="modal-header">
+          <div>
+            <h2 id="format-modal-title">Audio format</h2>
+            <p>Choose the file format for new downloads.</p>
+          </div>
+          <button id="format-modal-close" class="modal-close" aria-label="Close format selection">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="format-options" role="radiogroup" aria-label="Audio format">
+            <button type="button" class="format-option" data-format="opus" role="radio" aria-checked="false">
+              <span><strong>Opus</strong><small>Compact files with excellent quality</small></span>
+              <span class="format-option-check" aria-hidden="true">✓</span>
+            </button>
+            <button type="button" class="format-option" data-format="mp3" role="radio" aria-checked="false">
+              <span><strong>MP3</strong><small>Best compatibility with most players</small></span>
+              <span class="format-option-check" aria-hidden="true">✓</span>
+            </button>
+            <button type="button" class="format-option" data-format="flac" role="radio" aria-checked="false">
+              <span><strong>FLAC</strong><small>Lossless audio with larger files</small></span>
+              <span class="format-option-check" aria-hidden="true">✓</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <script>
       const isAdmin = {{ is_admin | tojson }};
 
@@ -412,23 +452,69 @@
 
       // Format management
       const formatSelector = document.getElementById("format-selector");
+      const formatSelectorButton = document.getElementById("format-selector-button");
+      const formatSelectorLabel = document.getElementById("format-selector-label");
+      const formatModal = document.getElementById("format-modal");
+      const formatModalClose = document.getElementById("format-modal-close");
       const serverDefaultAudioFormat = {{ default_audio_format | tojson }};
+
+      function renderFormatSelection() {
+        const selectedOption = formatSelector.options[formatSelector.selectedIndex];
+        formatSelectorLabel.textContent = selectedOption?.textContent || "Opus";
+        document.querySelectorAll(".format-option").forEach((button) => {
+          const isSelected = button.dataset.format === formatSelector.value;
+          button.classList.toggle("selected", isSelected);
+          button.setAttribute("aria-checked", String(isSelected));
+        });
+      }
 
       function initFormat() {
         const savedFormat = localStorage.getItem("audioFormat") || serverDefaultAudioFormat || "opus";
         formatSelector.value = savedFormat;
+        if (!formatSelector.value) formatSelector.value = "opus";
+        renderFormatSelection();
       }
 
       function saveFormat() {
         localStorage.setItem("audioFormat", formatSelector.value);
+        renderFormatSelection();
+      }
+
+      function openFormatModal() {
+        renderFormatSelection();
+        formatModal.classList.add("active");
+        formatModal.querySelector(".format-option.selected")?.focus();
+      }
+
+      function closeFormatModal({ restoreFocus = true } = {}) {
+        formatModal.classList.remove("active");
+        if (restoreFocus) formatSelectorButton.focus();
       }
 
       formatSelector.addEventListener("change", saveFormat);
+      formatSelectorButton.addEventListener("click", openFormatModal);
+      formatModalClose.addEventListener("click", () => closeFormatModal());
+      formatModal.addEventListener("click", (event) => {
+        if (event.target === formatModal) closeFormatModal();
+      });
+      formatModal.querySelectorAll(".format-option").forEach((button) => {
+        button.addEventListener("click", () => {
+          formatSelector.value = button.dataset.format;
+          saveFormat();
+          closeFormatModal();
+        });
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && formatModal.classList.contains("active")) {
+          closeFormatModal();
+        }
+      });
       initFormat();
 
       // Audio playback management
       let currentAudio = null;
       let currentPlayingButton = null;
+      let currentPlaybackKey = null;
 
       const playbackIcons = {
         play: '<svg class="playback-icon playback-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11l9-5.5z"/></svg>',
@@ -445,22 +531,53 @@
         button.setAttribute("aria-label", label);
       }
 
+      function playbackKeyForButton(button) {
+        if (!button) return null;
+        if (button.classList.contains("library-play-btn")) {
+          return button.dataset.entryPath ? `file:${button.dataset.entryPath}` : null;
+        }
+        return button.dataset.videoId ? `video:${button.dataset.videoId}` : null;
+      }
+
+      function syncPlaybackVisuals(isPlaying = Boolean(currentAudio && !currentAudio.paused)) {
+        let connectedCurrentButton = null;
+        document.querySelectorAll(".play-btn").forEach((button) => {
+          const matchesCurrent = Boolean(
+            currentPlaybackKey && playbackKeyForButton(button) === currentPlaybackKey,
+          );
+          const showPlaying = matchesCurrent && isPlaying;
+          setPlaybackButtonState(button, showPlaying ? "pause" : "play");
+          button.disabled = false;
+          button.closest(".track")?.classList.toggle("is-playing", showPlaying);
+          if (matchesCurrent && !connectedCurrentButton) connectedCurrentButton = button;
+        });
+        if (connectedCurrentButton) currentPlayingButton = connectedCurrentButton;
+      }
+
       function initializePlaybackButtons(root = document) {
         const buttons = [];
         if (root.matches?.(".play-btn")) buttons.push(root);
         root.querySelectorAll?.(".play-btn").forEach((button) => buttons.push(button));
         buttons.forEach((button) => {
-          setPlaybackButtonState(button, "play");
-          if (button.dataset.playbackBound === "true") return;
-          button.dataset.playbackBound = "true";
-          button.addEventListener("click", (event) => {
-            event.stopPropagation();
-            if (button.classList.contains("library-play-btn")) {
-              toggleLocalPlay(button.dataset.entryPath, button);
-              return;
-            }
-            togglePlay(button.dataset.videoId, button);
-          });
+          if (button.dataset.playbackBound !== "true") {
+            button.dataset.playbackBound = "true";
+            button.addEventListener("click", (event) => {
+              event.stopPropagation();
+              if (button.classList.contains("library-play-btn")) {
+                toggleLocalPlay(button.dataset.entryPath, button);
+                return;
+              }
+              togglePlay(button.dataset.videoId, button);
+            });
+          }
+          const isCurrentAndPlaying = Boolean(
+            currentAudio &&
+            !currentAudio.paused &&
+            currentPlaybackKey &&
+            playbackKeyForButton(button) === currentPlaybackKey
+          );
+          setPlaybackButtonState(button, isCurrentAndPlaying ? "pause" : "play");
+          button.closest(".track")?.classList.toggle("is-playing", isCurrentAndPlaying);
         });
       }
 
@@ -516,9 +633,7 @@
       }
 
       function setPlayingVisual(isPlaying) {
-        if (!currentPlayingButton) return;
-        setPlaybackButtonState(currentPlayingButton, isPlaying ? "pause" : "play");
-        currentPlayingButton.closest(".track")?.classList.toggle("is-playing", isPlaying);
+        syncPlaybackVisuals(isPlaying);
         const toggle = document.getElementById("mini-player-toggle");
         setPlaybackButtonState(toggle, isPlaying ? "pause" : "play");
         toggle.title = isPlaying ? "Pause" : "Resume";
@@ -532,11 +647,11 @@
           currentAudio = null;
         }
         if (currentPlayingButton) {
-          currentPlayingButton.closest(".track")?.classList.remove("is-playing");
-          setPlaybackButtonState(currentPlayingButton, "play");
           currentPlayingButton.disabled = false;
-          currentPlayingButton = null;
         }
+        currentPlaybackKey = null;
+        currentPlayingButton = null;
+        syncPlaybackVisuals(false);
         document.getElementById("mini-player").hidden = true;
       }
 
@@ -557,7 +672,9 @@
       document.getElementById("mini-player-stop").addEventListener("click", stopCurrentAudio);
 
       async function togglePlay(videoId, button) {
-        if (currentPlayingButton === button) {
+        const playbackKey = `video:${videoId}`;
+        if (currentAudio && currentPlaybackKey === playbackKey) {
+          currentPlayingButton = button;
           await toggleMiniPlayer();
           return;
         }
@@ -572,6 +689,7 @@
           audio.preload = "auto";
           currentAudio = audio;
           currentPlayingButton = button;
+          currentPlaybackKey = playbackKey;
 
           const handlePlaybackFailure = (error) => {
             if (currentAudio !== audio) return;
@@ -583,9 +701,7 @@
           audio.addEventListener("loadedmetadata", () => {
             if (currentAudio !== audio) return;
             const isPlaying = !audio.paused;
-            setPlaybackButtonState(button, isPlaying ? "pause" : "play");
-            button.disabled = false;
-            button.closest(".track")?.classList.toggle("is-playing", isPlaying);
+            setPlayingVisual(isPlaying);
             showMiniPlayer(button);
           });
 
@@ -1115,6 +1231,9 @@
           resultTypeToggle.style.display = "none";
           loadLogs();
         }
+        // Re-apply the active song marker whenever a view is shown again.
+        // Async renders are covered by the playback MutationObserver as well.
+        requestAnimationFrame(() => syncPlaybackVisuals());
       }
 
       let listenbrainzEventSource = null;
@@ -2459,7 +2578,7 @@
           }
           populateSettings(data);
           formatSelector.value = data.values.audio_format;
-          localStorage.setItem("audioFormat", data.values.audio_format);
+          saveFormat();
           settingsMessage.textContent = data.message;
           settingsMessage.className = "settings-message success";
         } catch (error) {
@@ -3500,7 +3619,9 @@
       }
 
       async function toggleLocalPlay(entryPath, button) {
-        if (currentPlayingButton === button) {
+        const playbackKey = `file:${entryPath}`;
+        if (currentAudio && currentPlaybackKey === playbackKey) {
+          currentPlayingButton = button;
           await toggleMiniPlayer();
           return;
         }
@@ -3509,23 +3630,31 @@
         button.disabled = true;
         setPlaybackButtonState(button, "loading");
         try {
-          currentAudio = new Audio(`/api/library/play?entry_path=${encodeURIComponent(entryPath)}`);
-          currentAudio.playsInline = true;
-          currentAudio.preload = "auto";
+          const audio = new Audio(`/api/library/play?entry_path=${encodeURIComponent(entryPath)}`);
+          audio.playsInline = true;
+          audio.preload = "auto";
+          currentAudio = audio;
           currentPlayingButton = button;
-          currentAudio.addEventListener("canplay", () => {
-            const isPlaying = !currentAudio.paused;
-            setPlaybackButtonState(button, isPlaying ? "pause" : "play");
-            button.disabled = false;
-            button.closest(".track")?.classList.toggle("is-playing", isPlaying);
+          currentPlaybackKey = playbackKey;
+          audio.addEventListener("canplay", () => {
+            if (currentAudio !== audio) return;
+            const isPlaying = !audio.paused;
+            setPlayingVisual(isPlaying);
             showMiniPlayer(button);
           }, { once: true });
-          currentAudio.addEventListener("ended", stopCurrentAudio, { once: true });
-          currentAudio.addEventListener("error", () => {
+          audio.addEventListener("ended", () => {
+            if (currentAudio === audio) stopCurrentAudio();
+          }, { once: true });
+          audio.addEventListener("error", () => {
+            if (currentAudio !== audio) return;
             showStatus("The file could not be played.", true);
             stopCurrentAudio();
           }, { once: true });
-          await currentAudio.play();
+          showMiniPlayer(button);
+          await audio.play();
+          if (currentAudio !== audio) return;
+          setPlayingVisual(true);
+          showMiniPlayer(button);
         } catch (error) {
           showStatus("Playback could not be started.", true);
           stopCurrentAudio();
