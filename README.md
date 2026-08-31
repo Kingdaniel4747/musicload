@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshots/musicload-logo.svg" alt="Musicload" width="340">
+  <img src="docs/musicload-logo.svg" alt="Musicload" width="340">
 </p>
 
 <h1 align="center">Musicload</h1>
