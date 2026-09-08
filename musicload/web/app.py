@@ -118,7 +118,6 @@ if config.navidrome_url:
         SignedSessionMiddleware,
         secret_key=config.session_secret,
         session_cookie="musicload_session",
-        max_age=60 * 60 * 24 * 7,
         https_only=config.session_https_only,
     )
 

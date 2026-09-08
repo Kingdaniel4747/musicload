@@ -115,7 +115,7 @@ Musicload is network-first and is not intended to work offline.
 
 ## Optional login and integrations
 
-- **Navidrome login:** Musicload validates credentials through Navidrome and never stores the password. Use a strong session secret and keep HTTPS-only cookies enabled on an HTTPS deployment.
+- **Navidrome login:** Musicload validates credentials through Navidrome and never stores the password. A successful login is retained by the browser/PWA and renewed while it is used, including after container restarts. Keep the persistent `/data` mount and the same session secret; logging out, clearing browser data, changing the secret, or a browser policy can still end a login. Use a strong session secret and keep HTTPS-only cookies enabled on an HTTPS deployment.
 - **ListenBrainz:** personal Weekly Exploration recommendations and optional weekly downloads.
 - **Gotify:** notifications for completed or failed downloads.
 - **Cookies:** upload, replace, or remove a private Netscape-format `cookies.txt` from **Settings** when a source requires an authenticated YouTube session.

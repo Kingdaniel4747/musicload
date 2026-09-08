@@ -14,6 +14,13 @@ from typing import Any
 import httpx
 
 
+# A Musicload installation is commonly used as an installed PWA on a trusted
+# home device. Keep that login available across app and container restarts.
+# The cookie is renewed whenever the authenticated app is used, so active
+# devices do not have to log in on an arbitrary weekly schedule.
+PERSISTENT_SESSION_MAX_AGE = 60 * 60 * 24 * 365 * 10
+
+
 class AuthenticationError(Exception):
     """Raised when Navidrome rejects a login."""
 
@@ -38,7 +45,7 @@ class SignedSessionMiddleware:
         app,
         secret_key: str,
         session_cookie: str = "musicload_session",
-        max_age: int = 604800,
+        max_age: int = PERSISTENT_SESSION_MAX_AGE,
         https_only: bool = True,
     ):
         self.app = app
@@ -91,7 +98,12 @@ class SignedSessionMiddleware:
 
         async def send_with_cookie(message):
             if message["type"] == "http.response.start" and (
-                session != original or (existing and not session)
+                # Renew valid logins on use. Besides providing a sliding
+                # expiry, this migrates old seven-day cookies after the
+                # update without making users sign in again first.
+                session
+                or session != original
+                or (existing and not session)
             ):
                 if session:
                     value = self._encode(session)
