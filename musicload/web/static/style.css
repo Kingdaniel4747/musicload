@@ -3399,8 +3399,8 @@ button:active, .download-file-btn:active {
   .mini-player-stop {
     display: grid !important;
     place-items: center !important;
-    width: 2.55rem !important;
-    height: 2.55rem !important;
+    width: 40px !important;
+    height: 40px !important;
     padding: 0 !important;
     border: 0 !important;
     border-radius: 0 !important;
@@ -4156,7 +4156,17 @@ header {
 }
 .mini-player-info { padding-left: 0; }
 .mini-player-cover { width: 48px; height: 48px; }
-.mini-player-stop { width: 32px; height: 40px; }
+.mini-player-stop {
+  width: 32px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  margin: 0;
+  align-self: center;
+  line-height: 0;
+}
+.mini-player-stop svg { display: block; flex: none; }
 
 .mini-player-toggle {
   width: 40px;
@@ -4174,6 +4184,48 @@ header {
 
 button, a, input, select, textarea {
   transition: color 160ms var(--ease), background-color 160ms var(--ease), border-color 160ms var(--ease), opacity 160ms var(--ease), transform 160ms var(--ease);
+}
+
+/* Quiet hierarchy, consistent targets and immediate press feedback. */
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; font-optical-sizing: auto; }
+h1, h2, h3 { letter-spacing: -.025em; line-height: 1.2; }
+button { touch-action: manipulation; }
+button:active:not(:disabled) { transition-duration: 60ms; }
+.maintenance-tabs {
+  display: inline-flex;
+  gap: .25rem;
+  padding: .25rem;
+  margin: 0 0 1rem;
+  border-radius: .875rem;
+  background: var(--bg-secondary);
+}
+.maintenance-tabs button {
+  min-height: 44px;
+  padding: .5rem 1rem;
+  border: 0;
+  border-radius: .625rem;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  font-weight: 600;
+}
+.maintenance-tabs button[aria-selected="true"] { background: var(--bg-tertiary); color: var(--text-primary); }
+.library-delete-btn { min-width: 44px; min-height: 44px; display: inline-grid; place-items: center; padding: .5rem; }
+.track.folder-row { display: flex; flex-direction: row; align-items: center; gap: 1rem; padding: 1rem; }
+.folder-info { min-width: 0; flex: 1; text-align: left; }
+.folder-info .track-meta { display: block !important; margin-top: .25rem; }
+.folder-info .track-title { overflow-wrap: anywhere; white-space: normal; }
+.library-header { gap: 1rem; flex-wrap: wrap; }
+.mini-player { background: #202127ed; }
+@supports (backdrop-filter: blur(12px)) {
+  .mini-player { backdrop-filter: blur(12px); }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .mini-player { background: var(--surface-raised); backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --text-secondary: #e2e3e8; --text-tertiary: #c7cad4; --border-color: #858997; }
+  .mini-player, .modal-content { background: var(--bg-secondary); backdrop-filter: none; border-color: var(--text-secondary); }
 }
 
 input:focus-visible, select:focus-visible, textarea:focus-visible {
@@ -4294,7 +4346,7 @@ body.login-page {
   .modal-body { overscroll-behavior: contain; }
   .mini-player {
     bottom: calc(5.25rem + env(safe-area-inset-bottom));
-    grid-template-columns: 44px minmax(0, 1fr) 40px 28px;
+    grid-template-columns: 44px minmax(0, 1fr) 40px 40px;
     gap: 8px;
   }
   .mini-player-cover { width: 44px; height: 44px; }

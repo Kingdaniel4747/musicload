@@ -2,6 +2,25 @@
 
 Stand: 11. Oktober 2026.
 
+## Ergänzung 0.25.1: Library und Design
+
+- Design nach dem bereitgestellten Apple-Design-Skill verfeinert:
+  Systemschrift, klare Tab-Auswahl, direkte Rückmeldung und ausgerichtete
+  Player-Symbole. Reduzierte Transparenz und höherer Kontrast werden beachtet.
+- „Clean up“ öffnet „Duplicates“ und „Empty folders“. Erst „Start scan“
+  durchsucht die Bibliothek. Löschen bleibt eine bestätigte Einzelaktion.
+- Duplikatkandidaten verwenden bereinigte Namen, unscharfe Vergleiche,
+  Künstler-/Laufzeitprüfung und SHA-256 für identische Dateiinhalte.
+  Ähnliche Namen sind keine Garantie für identische Musik; ohne ähnliche
+  Metadaten werden verschiedene Kodierungen nicht akustisch erkannt.
+- Track-Löschen entfernt zugehörige Texte und danach leere Verzeichnisse.
+  Weitere Songs, gemeinsam verwendete Texte und unbekannte Dateien bleiben.
+- Die Ordneransicht findet auch musikfreie Unterbäume mit Restdateien.
+  Unbekannte Dateien oder Verknüpfungen blockieren deren Löschung; unmittelbar
+  vor jeder Löschung wird der Inhalt erneut geprüft.
+- 22 Offline-Tests sowie Python-/JavaScript-Syntaxprüfung bestanden.
+  Mobile Ansicht, manuelle Scans und lokale Wiedergabe mit Testdateien geprüft.
+
 ## Technische Basis
 
 Musicload verwendet Python/FastAPI für HTTP-APIs, Server-Sent Events für

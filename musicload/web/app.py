@@ -2224,54 +2224,14 @@ def _scan_library_files(download_dir: Path) -> list[Path]:
     files = [
         p
         for p in download_dir.rglob("*")
-        if p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
+        if not p.is_symlink() and p.is_file() and p.suffix.lower() in SUPPORTED_EXTENSIONS
     ]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return files
 
 
-def _normalise_duplicate_value(value: str | None) -> str:
-    import unicodedata
-
-    text = unicodedata.normalize("NFKD", (value or "").casefold())
-    text = "".join(character for character in text if not unicodedata.combining(character))
-    return re.sub(r"\W+", " ", text, flags=re.UNICODE).strip()
-
-
-_DUPLICATE_TITLE_NOISE = {
-    "audio",
-    "copy",
-    "hd",
-    "hq",
-    "kopie",
-    "lyric",
-    "lyrics",
-    "music",
-    "official",
-    "original",
-    "remaster",
-    "remastered",
-    "uhd",
-    "version",
-    "video",
-}
-
-
-def _duplicate_title_words(title: str | None) -> tuple[str, ...]:
-    """Return the meaningful words used to compare two song names."""
-    normalised_words = _normalise_duplicate_value(title).split()
-    words = []
-    for word in normalised_words:
-        if word in _DUPLICATE_TITLE_NOISE:
-            continue
-        if len(word) == 4 and word.isdecimal() and 1900 <= int(word) <= 2099:
-            continue
-        words.append(word)
-    return tuple(sorted(words or normalised_words))
-
-
 def _find_library_duplicates_sync(download_dir: Path) -> dict:
-    """Find possible duplicates with the same meaningful song-name words."""
+    """Find identical files and similar song names across folders."""
     records: list[dict] = []
     for file_path in _scan_library_files(download_dir):
         entry_path = str(file_path.relative_to(download_dir))
@@ -2290,26 +2250,8 @@ def _find_library_duplicates_sync(download_dir: Path) -> dict:
             }
         )
 
-    by_title_words: dict[tuple[str, ...], list[dict]] = {}
-    for record in records:
-        title_words = _duplicate_title_words(record["title"])
-        if not title_words:
-            continue
-        by_title_words.setdefault(title_words, []).append(record)
-
-    groups = [
-        {
-            "kind": "name",
-            "label": "Matching song name",
-            "confidence": "possible",
-            "key": " ".join(title_words),
-            "matched_words": list(title_words),
-            "tracks": matches,
-        }
-        for title_words, matches in by_title_words.items()
-        if len(matches) >= 2
-    ]
-    groups.sort(key=lambda group: group["key"])
+    from musicload.library_maintenance import duplicate_groups
+    groups = duplicate_groups(records, download_dir)
     duplicate_paths = {
         track["entry_path"]
         for group in groups
@@ -2453,6 +2395,28 @@ async def api_library_duplicates(request: Request):
     except OSError as error:
         logger.error("Duplicate scan failed: %s", error)
         raise HTTPException(status_code=500, detail=f"Duplicate scan failed: {error}")
+
+
+@app.get("/api/library/empty-folders")
+async def api_library_empty_folders(request: Request):
+    _require_admin(request)
+    from musicload.library_maintenance import scan_music_free_folders
+    return await asyncio.to_thread(scan_music_free_folders, get_config().download_dir)
+
+
+@app.delete("/api/library/empty-folders")
+async def api_library_delete_empty_folder(request: Request, entry_path: str = Query(...)):
+    _require_admin(request)
+    from musicload.library_maintenance import delete_music_free_folder
+    try:
+        await asyncio.to_thread(delete_music_free_folder, get_config().download_dir, entry_path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Folder not found")
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error))
+    except OSError:
+        raise HTTPException(status_code=409, detail="Folder changed or could not be removed; scan again")
+    return {"success": True}
 
 
 @app.get("/api/library/play")

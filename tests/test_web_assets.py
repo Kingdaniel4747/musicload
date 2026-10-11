@@ -55,6 +55,25 @@ class WebAssetsTests(unittest.TestCase):
         self.assertEqual(response.json()['url'], '/api/preview/abcdefghijk')
         self.assertEqual(self.client.get('/api/preview/invalid').status_code, 400)
 
+    def test_manual_folder_endpoints_revalidate_and_preserve_root(self):
+        root = Path(self.storage.name)
+        empty = root / 'Artist' / 'Empty'
+        empty.mkdir(parents=True)
+        (empty / 'old.lrc').write_text('lyrics')
+        result = self.client.get('/api/library/empty-folders')
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(empty.exists())
+        entry = result.json()['folders'][0]['entry_path']
+        new_song = empty / 'New.mp3'
+        new_song.write_bytes(b'music')
+        self.assertEqual(self.client.delete('/api/library/empty-folders', params={'entry_path': entry}).status_code, 409)
+        self.assertTrue(new_song.exists())
+        new_song.unlink()
+        self.assertEqual(self.client.delete('/api/library/empty-folders', params={'entry_path': entry}).status_code, 200)
+        self.assertTrue(root.exists())
+        self.assertFalse(empty.exists())
+        self.assertEqual(self.client.delete('/api/library/empty-folders', params={'entry_path': '..'}).status_code, 409)
+
     def test_lifespan_starts_queue_and_cleans_background_tasks(self):
         from musicload.web import app as module
         with TestClient(module.app) as client:

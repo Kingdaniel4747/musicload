@@ -179,7 +179,7 @@ findDuplicatesSettingsBtn.addEventListener("click", () => {
   settingsModal.classList.remove("active");
   updateUrlParams("", "library");
   setActiveTab("library", true);
-  loadLibraryDuplicates();
+  openLibraryMaintenance();
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && settingsModal.classList.contains("active")) {

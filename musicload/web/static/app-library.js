@@ -1,4 +1,78 @@
+let maintenanceTab = "duplicates";
+let emptyFolderData = null;
+let maintenanceScanId = 0;
+const trashIcon = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7m4-7v7"/></svg>';
+
+function maintenanceHeader(summary = "") {
+  return `<div class="explore-playlist-header library-header">
+    <div><h2>Library</h2><span class="explore-track-count">${summary}</span></div>
+    <div class="explore-section-actions"><button id="duplicates-back-btn" class="pagination-btn">All files</button><button id="duplicates-rescan-btn" class="btn btn-primary">Start scan</button></div>
+  </div><div class="maintenance-tabs" role="tablist" aria-label="Library maintenance">
+    <button role="tab" tabindex="${maintenanceTab === 'duplicates' ? 0 : -1}" aria-selected="${maintenanceTab === 'duplicates'}" data-maintenance="duplicates">Duplicates</button>
+    <button role="tab" tabindex="${maintenanceTab === 'folders' ? 0 : -1}" aria-selected="${maintenanceTab === 'folders'}" data-maintenance="folders">Empty folders</button>
+  </div>`;
+}
+
+function bindMaintenanceControls() {
+  document.getElementById("duplicates-back-btn").onclick = () => loadLibraryContent();
+  document.getElementById("duplicates-rescan-btn").onclick = () => maintenanceTab === "folders" ? scanEmptyFolders() : loadLibraryDuplicates();
+  libraryResults.querySelectorAll("[data-maintenance]").forEach(button => {
+    button.onclick = () => openLibraryMaintenance(button.dataset.maintenance);
+    button.onkeydown = event => {
+      if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+      event.preventDefault();
+      const next = event.key === "Home" ? "duplicates" : event.key === "End" ? "folders" : maintenanceTab === "duplicates" ? "folders" : "duplicates";
+      openLibraryMaintenance(next);
+      libraryResults.querySelector(`[data-maintenance="${next}"]`).focus();
+    };
+  });
+}
+
+function openLibraryMaintenance(tab = "duplicates") {
+  maintenanceScanId++;
+  libraryDuplicateMode = true;
+  maintenanceTab = tab;
+  if (tab === "folders") renderEmptyFolders();
+  else renderLibraryDuplicates(libraryDuplicateData);
+}
+
+async function scanEmptyFolders() {
+  const id = ++maintenanceScanId;
+  const button = document.getElementById("duplicates-rescan-btn");
+  button.disabled = true;
+  button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span> Scanning';
+  try {
+    const response = await fetch("/api/library/empty-folders");
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.detail || "Scan failed");
+    emptyFolderData = data;
+    if (id === maintenanceScanId && libraryDuplicateMode) renderEmptyFolders();
+  } catch (error) {
+    showStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Start scan";
+  }
+}
+
+function renderEmptyFolders() {
+  libraryResults.innerHTML = maintenanceHeader(emptyFolderData ? `${emptyFolderData.total} folders without music` : "") +
+    (!emptyFolderData ? '<div class="duplicates-empty">Start a scan</div>' : !emptyFolderData.folders.length ? '<div class="duplicates-empty">No empty folders</div>' :
+      emptyFolderData.folders.map(folder => `<div class="track folder-row"><div class="folder-info"><div class="track-title">${escapeHtml(folder.entry_path)}</div><div class="track-meta">${folder.file_count} residual files${folder.can_delete ? '' : ' · Other files protected'}</div></div><button class="library-delete-btn folder-delete-btn" data-entry-path="${escapeHtml(folder.entry_path)}" aria-label="Delete folder" title="Delete folder" ${folder.can_delete ? '' : 'disabled'}>${trashIcon}</button></div>`).join(""));
+  bindMaintenanceControls();
+  libraryResults.querySelectorAll(".folder-delete-btn:not(:disabled)").forEach(button => {
+    button.onclick = () => runConfirmedAction({button, title: "Delete folder?", message: `Delete "${button.dataset.entryPath}" and its remaining files?`, actionLabel: "Delete", errorLabel: "Delete failed", action: async () => {
+      const response = await fetch(`/api/library/empty-folders?entry_path=${encodeURIComponent(button.dataset.entryPath)}`, {method: "DELETE"});
+      if (!response.ok) { const data = await response.json(); throw new Error(data.detail || "Delete failed"); }
+      emptyFolderData.folders = emptyFolderData.folders.filter(folder => folder.entry_path !== button.dataset.entryPath);
+      emptyFolderData.total = emptyFolderData.folders.length;
+      if (libraryDuplicateMode && maintenanceTab === "folders") renderEmptyFolders();
+    }});
+  });
+}
+
 async function loadLibraryContent(reset = true, query = searchInput.value.trim()) {
+  maintenanceScanId++;
   libraryDuplicateMode = false;
   if (reset) {
     libraryOffset = 0;
@@ -30,7 +104,7 @@ function renderLibraryTracks() {
         <span class="explore-track-count">${libraryTracks.length} / ${libraryTotal} files${searchInput.value.trim() ? " matching your search" : ""}</span>
       </div>
       <div class="explore-section-actions">
-        <button class="library-explore-btn" id="library-explore-btn">Explore</button>
+        <button class="pagination-btn" id="library-maintenance-btn">Clean up</button><button class="library-explore-btn" id="library-explore-btn">Explore</button>
       </div>
     </div>
     <div class="explore-tracks-list" id="library-tracks-list">
@@ -53,7 +127,7 @@ function renderLibraryTracks() {
         </div>
         <div class="track-actions">
           <button class="play-btn library-play-btn" data-entry-path="${escapeHtml(track.entry_path)}" aria-label="Play preview" title="Play preview">▶</button>
-          <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}" aria-label="Delete file" title="Delete file">Delete</button>
+          <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}" aria-label="Delete file" title="Delete file">${trashIcon}</button>
         </div>
       </div>
     `,
@@ -71,6 +145,7 @@ function renderLibraryTracks() {
 
   libraryResults.innerHTML = html;
 
+  document.getElementById("library-maintenance-btn").onclick = () => openLibraryMaintenance();
   const loadMoreBtn = document.getElementById("library-load-more");
   if (loadMoreBtn) {
     loadMoreBtn.addEventListener("click", async () => {
@@ -98,20 +173,21 @@ function renderLibraryTracks() {
 }
 
 async function loadLibraryDuplicates() {
-  libraryDuplicateMode = true;
-  libraryResults.innerHTML = `
-    <div class="explore-loading">
-      <span class="button-spinner" aria-hidden="true"></span>
-      Scanning local files for duplicates…
-    </div>`;
+  const id = ++maintenanceScanId;
+  const button = document.getElementById("duplicates-rescan-btn");
+  button.disabled = true;
+  button.innerHTML = '<span class="button-spinner" aria-hidden="true"></span> Scanning';
   try {
     const response = await fetch("/api/library/duplicates");
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || "Duplicate scan failed");
+    if (!response.ok) throw new Error(data.detail || "Scan failed");
     libraryDuplicateData = data;
-    renderLibraryDuplicates(data);
+    if (id === maintenanceScanId && libraryDuplicateMode) renderLibraryDuplicates(data);
   } catch (error) {
-    libraryResults.innerHTML = `<div class="explore-error">Duplicate scan failed: ${escapeHtml(error.message)}</div>`;
+    showStatus(error.message, true);
+  } finally {
+    button.disabled = false;
+    button.textContent = "Start scan";
   }
 }
 
@@ -122,25 +198,19 @@ function duplicateSummaryText(data) {
 }
 
 function renderLibraryDuplicates(data) {
-  let html = `
-    <div class="explore-playlist-header library-header duplicate-library-header">
-      <div>
-        <h2>Library duplicates</h2>
-        <span class="explore-track-count">${duplicateSummaryText(data)}</span>
-      </div>
-      <div class="explore-section-actions">
-        <button id="duplicates-back-btn" class="pagination-btn">All files</button>
-        <button id="duplicates-rescan-btn" class="pagination-btn">Scan again</button>
-      </div>
-    </div>
-    <p class="duplicate-explanation">Possible matches have the same meaningful words in their song names. Common additions such as “official audio”, “lyrics”, “copy”, and remaster years are ignored. Review the cover, song details and audio before deciding. Musicload never selects or deletes a file automatically. The current result stays in place until you select Scan again.</p>
-  `;
+  let html = maintenanceHeader(data ? duplicateSummaryText(data) : "");
+  if (!data) {
+    libraryResults.innerHTML = html + '<div class="duplicates-empty">Start a scan</div>';
+    bindMaintenanceControls();
+    return;
+  }
+  html += '<p class="duplicate-explanation">Listen before deleting</p>';
 
   if (!data.groups.length) {
     html += `
       <div class="duplicates-empty">
         <strong>No duplicates found</strong>
-        <span>No song names with the same meaningful words were found.</span>
+        <span>No matching files or similar titles.</span>
       </div>`;
   } else {
     html += '<div class="duplicate-groups">';
@@ -148,7 +218,7 @@ function renderLibraryDuplicates(data) {
       <section class="duplicate-group ${group.kind}">
         <div class="duplicate-group-header">
           <div>
-            <span class="duplicate-kind">Possible name match</span>
+            <span class="duplicate-kind">${escapeHtml(group.label || "Similar titles")}</span>
             <strong class="duplicate-group-count">${group.tracks.length} matching files</strong>
           </div>
           <span class="duplicate-group-number">Group ${index + 1}</span>
@@ -171,7 +241,7 @@ function renderLibraryDuplicates(data) {
               </div>
               <div class="track-actions">
                 <button class="play-btn library-play-btn" data-entry-path="${escapeHtml(track.entry_path)}" aria-label="Play file">▶</button>
-                <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}">Delete</button>
+                <button class="library-delete-btn" data-entry-path="${escapeHtml(track.entry_path)}" data-title="${escapeHtml(track.title)}" aria-label="Delete file" title="Delete file">${trashIcon}</button>
               </div>
             </div>
           `).join("")}
@@ -182,10 +252,7 @@ function renderLibraryDuplicates(data) {
   }
 
   libraryResults.innerHTML = html;
-  document.getElementById("duplicates-back-btn").addEventListener("click", () => {
-    loadLibraryContent(true, searchInput.value.trim());
-  });
-  document.getElementById("duplicates-rescan-btn").addEventListener("click", loadLibraryDuplicates);
+  bindMaintenanceControls();
   libraryResults.querySelectorAll(".library-delete-btn").forEach((button) => {
     button.addEventListener("click", handleLibraryDelete);
   });

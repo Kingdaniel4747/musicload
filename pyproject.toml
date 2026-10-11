@@ -1,6 +1,6 @@
 [project]
 name = "musicload"
-version = "0.25.0"
+version = "0.25.1"
 description = "Search and download music from YouTube Music with lyrics"
 readme = "README.md"
 requires-python = ">=3.12"
