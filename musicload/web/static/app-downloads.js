@@ -3,22 +3,18 @@ let eventSource = null;
 let queueReconnectTimer = null;
 let queuePollTimer = null;
 let queueFetchInFlight = null;
-let queueReconnectDelay = 2000;
 
 function clearQueuePoll() {
   if (!queuePollTimer) return;
-  window.clearTimeout(queuePollTimer);
+  clearTimeout(queuePollTimer);
   queuePollTimer = null;
 }
 
-function scheduleQueueFallbackPoll(delay = 10000) {
+function scheduleQueuePoll(delay = 2000) {
   clearQueuePoll();
-  queuePollTimer = window.setTimeout(() => {
+  queuePollTimer = setTimeout(() => {
     queuePollTimer = null;
-    if (eventSource) return;
-    fetchQueue().finally(() => {
-      if (!eventSource) scheduleQueueFallbackPoll();
-    });
+    fetchQueue();
   }, delay);
 }
 
@@ -41,8 +37,7 @@ function initQueue() {
   };
 
   source.onopen = () => {
-    queueReconnectDelay = 2000;
-    clearQueuePoll();
+    if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
   };
 
   source.onerror = (error) => {
@@ -51,13 +46,11 @@ function initQueue() {
     source.close();
     eventSource = null;
     fetchQueue();
-    scheduleQueueFallbackPoll();
-    const reconnectAfter = queueReconnectDelay;
-    queueReconnectDelay = Math.min(queueReconnectDelay * 2, 30000);
+    scheduleQueuePoll();
     queueReconnectTimer = setTimeout(() => {
       queueReconnectTimer = null;
       initQueue();
-    }, reconnectAfter);
+    }, 5000);
   };
 
   // Load initial queue
@@ -76,16 +69,12 @@ async function fetchQueue() {
       updateQueueUI(data.jobs);
     } catch (error) {
       console.error("Failed to fetch queue:", error);
+      scheduleQueuePoll(5000);
     } finally {
       queueFetchInFlight = null;
     }
   })();
   return queueFetchInFlight;
-}
-
-function addOptimisticQueueJob(job) {
-  queueJobs = [job, ...queueJobs.filter((item) => item.id !== job.id)];
-  updateQueueUI(queueJobs);
 }
 
 function updateQueueUI(jobs) {
@@ -95,6 +84,18 @@ function updateQueueUI(jobs) {
     (left, right) => new Date(right.created_at) - new Date(left.created_at),
   );
   queueJobs = jobs;
+  const activeJobsByVideo = new Map(jobs.filter((job) => ["queued", "downloading"].includes(job.status)).map((job) => [job.video_id, job]));
+  const jobsById = new Map(jobs.map((job) => [job.id, job]));
+  // Some reverse proxies keep the SSE connection open but buffer its
+  // events. Poll while work is active so queued/completed cards still
+  // appear without a page refresh; SSE remains the fast primary path.
+  if (jobs.some((job) => ["queued", "downloading"].includes(job.status))) {
+    scheduleQueuePoll(1500);
+  } else if (!eventSource) {
+    scheduleQueuePoll(5000);
+  } else {
+    clearQueuePoll();
+  }
   const shouldGlow = currentTab !== "downloads" && downloadAttention;
   document.getElementById("downloads-btn").classList.toggle(
     "download-active",
@@ -105,12 +106,7 @@ function updateQueueUI(jobs) {
     .classList.toggle("download-active", shouldGlow);
 
   document.querySelectorAll(".download-btn[data-video-id]").forEach((button) => {
-    const job = jobs.find(
-      (item) =>
-        item.id === button.dataset.queueJobId ||
-        (item.video_id === button.dataset.videoId &&
-          ["queued", "downloading"].includes(item.status)),
-    );
+    const job = jobsById.get(button.dataset.queueJobId) || activeJobsByVideo.get(button.dataset.videoId);
     if (job && ["queued", "downloading"].includes(job.status)) {
       renderInlineDownload(button, job);
     } else if (button.dataset.queueJobId) {
@@ -119,6 +115,10 @@ function updateQueueUI(jobs) {
   });
 
   queueSection.style.display = "block";
+  const query = currentTab === "downloads" ? searchInput.value.trim().toLowerCase() : "";
+  const signature = JSON.stringify([jobs, query]);
+  if (queueList.renderSignature === signature) return;
+  queueList.renderSignature = signature;
   if (jobs.length === 0) {
     queueList.innerHTML = `
       <div class="downloads-empty">
@@ -128,7 +128,6 @@ function updateQueueUI(jobs) {
     return;
   }
 
-  const query = currentTab === "downloads" ? searchInput.value.trim().toLowerCase() : "";
   const visibleJobs = query
     ? jobs.filter((job) => `${job.title} ${job.artist}`.toLowerCase().includes(query))
     : jobs;
@@ -207,8 +206,6 @@ async function removeJob(jobId, deleteFile = false) {
       const data = await response.json().catch(() => ({}));
       throw new Error(data.detail || "Request failed");
     }
-    queueJobs = queueJobs.filter((job) => job.id !== jobId);
-    updateQueueUI(queueJobs);
   } catch (error) {
     console.error("Failed to remove job:", error);
     throw error;
@@ -221,7 +218,6 @@ async function cancelAllDownloads() {
   try {
     const response = await fetch("/api/queue/cancel-all", { method: "POST" });
     if (!response.ok) throw new Error("Cancellation failed");
-    await fetchQueue();
   } catch (error) {
     showStatus("Failed to cancel downloads", true);
   } finally {
@@ -230,110 +226,3 @@ async function cancelAllDownloads() {
 }
 
 document.getElementById("cancel-all-btn").addEventListener("click", cancelAllDownloads);
-
-// Initialize queue on page load
-initQueue();
-
-window.addEventListener("pageshow", () => fetchQueue());
-document.addEventListener("visibilitychange", () => {
-  if (!document.hidden) fetchQueue();
-});
-
-// Reusable in-app confirmation dialog for destructive actions.
-const confirmModal = document.getElementById("confirm-modal");
-const confirmTitle = document.getElementById("confirm-title");
-const confirmMessage = document.getElementById("confirm-message");
-const confirmAction = document.getElementById("confirm-action");
-const confirmCancel = document.getElementById("confirm-cancel");
-const confirmClose = document.getElementById("confirm-close");
-let confirmResolver = null;
-
-function closeConfirmation(confirmed) {
-  confirmModal.classList.remove("active");
-  if (confirmResolver) {
-    confirmResolver(confirmed);
-    confirmResolver = null;
-  }
-}
-
-function askForConfirmation({ title, message, actionLabel = "Delete" }) {
-  confirmTitle.textContent = title;
-  confirmMessage.textContent = message;
-  confirmAction.textContent = actionLabel;
-  confirmModal.classList.add("active");
-  confirmAction.focus();
-  return new Promise((resolve) => {
-    confirmResolver = resolve;
-  });
-}
-
-async function runConfirmedAction({
-  button,
-  title,
-  message,
-  actionLabel = "Delete",
-  pendingLabel = "Deleting...",
-  errorLabel = "Action failed",
-  action,
-}) {
-  const confirmed = await askForConfirmation({ title, message, actionLabel });
-  if (!confirmed) return false;
-
-  const originalLabel = button.textContent;
-  button.disabled = true;
-  button.textContent = pendingLabel;
-  try {
-    await action();
-    return true;
-  } catch (error) {
-    showStatus(`${errorLabel}: ${error.message}`, true);
-    return false;
-  } finally {
-    button.disabled = false;
-    button.textContent = originalLabel;
-  }
-}
-
-confirmAction.addEventListener("click", () => closeConfirmation(true));
-confirmCancel.addEventListener("click", () => closeConfirmation(false));
-confirmClose.addEventListener("click", () => closeConfirmation(false));
-confirmModal.addEventListener("click", (event) => {
-  if (event.target === confirmModal) closeConfirmation(false);
-});
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && confirmModal.classList.contains("active")) {
-    closeConfirmation(false);
-  }
-});
-document.getElementById("queue-list").addEventListener("click", async (event) => {
-  const clearButton = event.target.closest(".clear-job-btn");
-  if (clearButton) {
-    const deleteFile = clearButton.dataset.deleteFile === "true";
-    const title = queueJobs.find((job) => job.id === clearButton.dataset.jobId)?.title || "this download";
-    const removed = await runConfirmedAction({
-      button: clearButton,
-      title: deleteFile ? "Delete downloaded file?" : "Clear download entry?",
-      message: deleteFile
-        ? `Delete "${title}", its lyrics, and any folder left without another song? This cannot be undone.`
-        : `Remove "${title}" from the download history?`,
-      actionLabel: deleteFile ? "Delete File" : "Clear Entry",
-      pendingLabel: deleteFile ? "Deleting..." : "Clearing...",
-      errorLabel: deleteFile ? "Delete failed" : "Clear failed",
-      action: () => removeJob(clearButton.dataset.jobId, deleteFile),
-    });
-    if (removed) showStatus(deleteFile ? `Deleted: ${title}` : `Cleared: ${title}`);
-    return;
-  }
-
-  const cancelButton = event.target.closest(".cancel-job-btn");
-  if (cancelButton) {
-    cancelButton.disabled = true;
-    cancelButton.textContent = "Cancelling...";
-    try {
-      await removeJob(cancelButton.dataset.jobId);
-    } catch (error) {
-      cancelButton.disabled = false;
-      cancelButton.textContent = "Cancel";
-    }
-  }
-});

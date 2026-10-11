@@ -21,6 +21,7 @@ async function loadLibraryContent(reset = true, query = searchInput.value.trim()
     libraryResults.innerHTML = `<div class="explore-error">Failed to load local files: ${error.message}</div>`;
   }
 }
+
 function renderLibraryTracks() {
   let html = `
     <div class="explore-playlist-header library-header">
@@ -40,7 +41,7 @@ function renderLibraryTracks() {
       (track) => `
       <div class="track" data-entry-path="${escapeHtml(track.entry_path)}">
         <div class="track-main">
-          <img class="track-cover library-cover" src="/api/library/thumbnail?entry_path=${encodeURIComponent(track.entry_path)}" alt="" loading="lazy" onerror="this.style.display='none'">
+          <img class="track-cover library-cover" src="/api/library/thumbnail?entry_path=${encodeURIComponent(track.entry_path)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
           <div class="track-info">
             <div class="track-title">${escapeHtml(track.title)}</div>
             <div class="track-artist">${escapeHtml(track.artist)}${track.album ? " - " + escapeHtml(track.album) : ""}</div>
@@ -191,20 +192,10 @@ function renderLibraryDuplicates(data) {
 }
 
 async function toggleLocalPlay(entryPath, button) {
-  if (currentPlayingButton === button) {
-    const audio = currentAudio;
-    try {
-      await toggleMiniPlayer();
-    } catch (error) {
-      if (audio) {
-        await reportPlaybackFailure(
-          audio,
-          audio.playbackDebugId || createPlaybackDebugId(),
-          playbackClientErrorCode(error, audio.error),
-          error,
-        );
-      }
-    }
+  const playbackKey = `file:${entryPath}`;
+  if (currentAudio && currentPlaybackKey === playbackKey) {
+    currentPlayingButton = button;
+    await toggleMiniPlayer();
     return;
   }
 
@@ -212,50 +203,36 @@ async function toggleLocalPlay(entryPath, button) {
   button.disabled = true;
   setPlaybackButtonState(button, "loading");
   try {
-    const debugId = createPlaybackDebugId();
     const audio = new Audio(`/api/library/play?entry_path=${encodeURIComponent(entryPath)}`);
     audio.playsInline = true;
     audio.preload = "auto";
-    audio.playbackDebugId = debugId;
     currentAudio = audio;
     currentPlayingButton = button;
-    audio.playbackStartTimer = window.setTimeout(() => {
-      if (currentAudio !== audio || !audio.paused) return;
-      reportPlaybackFailure(audio, debugId, "P206", new Error("Local playback startup timed out"));
-    }, 30000);
-    audio.addEventListener("playing", () => {
-      window.clearTimeout(audio.playbackStartTimer);
-    });
+    currentPlaybackKey = playbackKey;
+    bindAudioLifecycle(audio, button);
     audio.addEventListener("canplay", () => {
       if (currentAudio !== audio) return;
       const isPlaying = !audio.paused;
-      setPlaybackButtonState(button, isPlaying ? "pause" : "play");
-      button.disabled = false;
-      button.closest(".track")?.classList.toggle("is-playing", isPlaying);
+      setPlayingVisual(isPlaying);
       showMiniPlayer(button);
     }, { once: true });
     audio.addEventListener("ended", () => {
       if (currentAudio === audio) stopCurrentAudio();
     }, { once: true });
-    audio.addEventListener("error", (error) => {
+    audio.addEventListener("error", () => {
       if (currentAudio !== audio) return;
-      reportPlaybackFailure(
-        audio,
-        debugId,
-        playbackClientErrorCode(null, audio.error),
-        error,
-      );
+      showStatus("The file could not be played.", true);
+      stopCurrentAudio();
     }, { once: true });
+    showMiniPlayer(button);
     await audio.play();
+    if (currentAudio !== audio) return;
+    setPlayingVisual(!audio.paused);
+    showMiniPlayer(button);
   } catch (error) {
-    const audio = currentAudio;
-    if (!audio) return;
-    await reportPlaybackFailure(
-      audio,
-      audio.playbackDebugId || createPlaybackDebugId(),
-      playbackClientErrorCode(error, audio.error),
-      error,
-    );
+    if (currentPlayingButton !== button) return;
+    showStatus("Playback could not be started.", true);
+    stopCurrentAudio();
   }
 }
 
@@ -314,7 +291,7 @@ async function handleLibraryDelete(e) {
   await runConfirmedAction({
     button: btn,
     title: "Delete local file?",
-    message: `Delete "${title}", its lyrics, and any folder left without another song? This cannot be undone.`,
+    message: `Delete "${title}" permanently from your music folder? This cannot be undone.`,
     actionLabel: "Delete File",
     errorLabel: "Delete failed",
     action: async () => {

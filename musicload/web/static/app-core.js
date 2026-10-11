@@ -8,25 +8,72 @@ if ("serviceWorker" in navigator) {
     });
   });
 }
+
 // Format management
 const formatSelector = document.getElementById("format-selector");
+const formatSelectorButton = document.getElementById("format-selector-button");
+const formatSelectorLabel = document.getElementById("format-selector-label");
+const formatModal = document.getElementById("format-modal");
+const formatModalClose = document.getElementById("format-modal-close");
 const serverDefaultAudioFormat = appScript.dataset.defaultAudioFormat;
+
+function renderFormatSelection() {
+  const selectedOption = formatSelector.options[formatSelector.selectedIndex];
+  formatSelectorLabel.textContent = selectedOption?.textContent || "Opus";
+  document.querySelectorAll(".format-option").forEach((button) => {
+    const isSelected = button.dataset.format === formatSelector.value;
+    button.classList.toggle("selected", isSelected);
+    button.setAttribute("aria-checked", String(isSelected));
+  });
+}
 
 function initFormat() {
   const savedFormat = localStorage.getItem("audioFormat") || serverDefaultAudioFormat || "opus";
   formatSelector.value = savedFormat;
+  if (!formatSelector.value) formatSelector.value = "opus";
+  renderFormatSelection();
 }
 
 function saveFormat() {
   localStorage.setItem("audioFormat", formatSelector.value);
+  renderFormatSelection();
+}
+
+function openFormatModal() {
+  renderFormatSelection();
+  formatModal.classList.add("active");
+  formatModal.querySelector(".format-option.selected")?.focus();
+}
+
+function closeFormatModal({ restoreFocus = true } = {}) {
+  formatModal.classList.remove("active");
+  if (restoreFocus) formatSelectorButton.focus();
 }
 
 formatSelector.addEventListener("change", saveFormat);
+formatSelectorButton.addEventListener("click", openFormatModal);
+formatModalClose.addEventListener("click", () => closeFormatModal());
+formatModal.addEventListener("click", (event) => {
+  if (event.target === formatModal) closeFormatModal();
+});
+formatModal.querySelectorAll(".format-option").forEach((button) => {
+  button.addEventListener("click", () => {
+    formatSelector.value = button.dataset.format;
+    saveFormat();
+    closeFormatModal();
+  });
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && formatModal.classList.contains("active")) {
+    closeFormatModal();
+  }
+});
 initFormat();
 
 // Audio playback management
 let currentAudio = null;
 let currentPlayingButton = null;
+let currentPlaybackKey = null;
 
 const playbackIcons = {
   play: '<svg class="playback-icon playback-icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6.5v11l9-5.5z"/></svg>',
@@ -37,10 +84,34 @@ const playbackIcons = {
 function setPlaybackButtonState(button, state) {
   if (!button) return;
   const nextState = playbackIcons[state] ? state : "play";
+  if (button.dataset.playbackState === nextState) return;
   button.innerHTML = playbackIcons[nextState];
   button.dataset.playbackState = nextState;
   const label = nextState === "pause" ? "Pause playback" : nextState === "loading" ? "Loading playback" : "Play playback";
   button.setAttribute("aria-label", label);
+}
+
+function playbackKeyForButton(button) {
+  if (!button) return null;
+  if (button.classList.contains("library-play-btn")) {
+    return button.dataset.entryPath ? `file:${button.dataset.entryPath}` : null;
+  }
+  return button.dataset.videoId ? `video:${button.dataset.videoId}` : null;
+}
+
+function syncPlaybackVisuals(isPlaying = Boolean(currentAudio && !currentAudio.paused)) {
+  let connectedCurrentButton = null;
+  document.querySelectorAll(".play-btn").forEach((button) => {
+    const matchesCurrent = Boolean(
+      currentPlaybackKey && playbackKeyForButton(button) === currentPlaybackKey,
+    );
+    const showPlaying = matchesCurrent && isPlaying;
+    setPlaybackButtonState(button, showPlaying ? "pause" : "play");
+    button.disabled = false;
+    button.closest(".track")?.classList.toggle("is-playing", showPlaying);
+    if (matchesCurrent && !connectedCurrentButton) connectedCurrentButton = button;
+  });
+  if (connectedCurrentButton) currentPlayingButton = connectedCurrentButton;
 }
 
 function initializePlaybackButtons(root = document) {
@@ -48,17 +119,25 @@ function initializePlaybackButtons(root = document) {
   if (root.matches?.(".play-btn")) buttons.push(root);
   root.querySelectorAll?.(".play-btn").forEach((button) => buttons.push(button));
   buttons.forEach((button) => {
-    setPlaybackButtonState(button, "play");
-    if (button.dataset.playbackBound === "true") return;
-    button.dataset.playbackBound = "true";
-    button.addEventListener("click", (event) => {
-      event.stopPropagation();
-      if (button.classList.contains("library-play-btn")) {
-        toggleLocalPlay(button.dataset.entryPath, button);
-        return;
-      }
-      togglePlay(button.dataset.videoId, button);
-    });
+    if (button.dataset.playbackBound !== "true") {
+      button.dataset.playbackBound = "true";
+      button.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (button.classList.contains("library-play-btn")) {
+          toggleLocalPlay(button.dataset.entryPath, button).catch(() => showStatus("Playback could not be resumed.", true));
+          return;
+        }
+        togglePlay(button.dataset.videoId, button).catch(() => showStatus("Playback could not be resumed.", true));
+      });
+    }
+    const isCurrentAndPlaying = Boolean(
+      currentAudio &&
+      !currentAudio.paused &&
+      currentPlaybackKey &&
+      playbackKeyForButton(button) === currentPlaybackKey
+    );
+    setPlaybackButtonState(button, isCurrentAndPlaying ? "pause" : "play");
+    button.closest(".track")?.classList.toggle("is-playing", isCurrentAndPlaying);
   });
 }
 
@@ -73,22 +152,10 @@ initializePlaybackButtons();
 function setMiniPlayerText(id, text) {
   const line = document.getElementById(id);
   const value = text || "";
+  if (line.dataset.text === value) return;
   line.dataset.text = value;
-  line.innerHTML = `<span class="mini-player-text-track"><span>${escapeHtml(value)}</span><span aria-hidden="true">${escapeHtml(value)}</span></span>`;
-  requestAnimationFrame(() => {
-    const firstCopy = line.querySelector(".mini-player-text-track > span");
-    line.classList.toggle("is-overflowing", Boolean(firstCopy && firstCopy.scrollWidth > line.clientWidth));
-  });
+  line.textContent = value;
 }
-
-function refreshMiniPlayerText() {
-  ["mini-player-title", "mini-player-artist"].forEach((id) => {
-    const line = document.getElementById(id);
-    if (line?.dataset.text !== undefined) setMiniPlayerText(id, line.dataset.text);
-  });
-}
-
-window.addEventListener("resize", refreshMiniPlayerText);
 
 function showMiniPlayer(button) {
   const track = button.closest(".track");
@@ -105,8 +172,8 @@ function showMiniPlayer(button) {
     miniPlayerCover.src = "/static/musicload-mark.svg";
     miniPlayerCover.hidden = false;
   }
-  setMiniPlayerText("mini-player-title", track?.querySelector(".track-title")?.textContent || "Playing");
-  setMiniPlayerText("mini-player-artist", track?.querySelector(".track-artist")?.textContent || "");
+  setMiniPlayerText("mini-player-title", metadataText(track?.querySelector(".track-title")) || "Playing");
+  setMiniPlayerText("mini-player-artist", metadataText(track?.querySelector(".track-artist")));
   const isPlaying = Boolean(currentAudio && !currentAudio.paused);
   setPlaybackButtonState(document.getElementById("mini-player-toggle"), isPlaying ? "pause" : "play");
   document.getElementById("mini-player-toggle").title = isPlaying ? "Pause" : "Resume";
@@ -114,27 +181,10 @@ function showMiniPlayer(button) {
 }
 
 function setPlayingVisual(isPlaying) {
-  if (!currentPlayingButton) return;
-  setPlaybackButtonState(currentPlayingButton, isPlaying ? "pause" : "play");
-  currentPlayingButton.closest(".track")?.classList.toggle("is-playing", isPlaying);
+  syncPlaybackVisuals(isPlaying);
   const toggle = document.getElementById("mini-player-toggle");
   setPlaybackButtonState(toggle, isPlaying ? "pause" : "play");
   toggle.title = isPlaying ? "Pause" : "Resume";
-}
-
-function releasePlaybackSessionId(sessionId) {
-  if (!sessionId) return;
-  fetch(`/api/playback/session/${encodeURIComponent(sessionId)}`, {
-    method: "DELETE",
-    keepalive: true,
-  }).catch((error) => console.warn("Temporary playback cleanup failed:", error));
-}
-
-function releasePlaybackSession(audio) {
-  if (!audio?.playbackSessionId) return;
-  const sessionId = audio.playbackSessionId;
-  audio.playbackSessionId = null;
-  releasePlaybackSessionId(sessionId);
 }
 
 function stopCurrentAudio() {
@@ -145,22 +195,22 @@ function stopCurrentAudio() {
     audio.pause();
     audio.removeAttribute("src");
     audio.load();
-    releasePlaybackSession(audio);
   }
   if (currentPlayingButton) {
-    currentPlayingButton.closest(".track")?.classList.remove("is-playing");
-    setPlaybackButtonState(currentPlayingButton, "play");
     currentPlayingButton.disabled = false;
-    currentPlayingButton = null;
   }
+  currentPlaybackKey = null;
+  currentPlayingButton = null;
+  syncPlaybackVisuals(false);
   document.getElementById("mini-player").hidden = true;
 }
 
 async function toggleMiniPlayer() {
   if (!currentAudio) return;
-  if (currentAudio.paused) {
-    await currentAudio.play();
-    setPlayingVisual(true);
+  const audio = currentAudio;
+  if (audio.paused) {
+    await audio.play();
+    if (currentAudio === audio) setPlayingVisual(!audio.paused);
   } else {
     currentAudio.pause();
     setPlayingVisual(false);
@@ -168,91 +218,37 @@ async function toggleMiniPlayer() {
 }
 
 document.getElementById("mini-player-toggle").addEventListener("click", () => {
-  const audio = currentAudio;
-  toggleMiniPlayer().catch((error) => {
-    if (!audio) return;
-    reportPlaybackFailure(
-      audio,
-      audio.playbackDebugId || createPlaybackDebugId(),
-      playbackClientErrorCode(error, audio.error),
-      error,
-    );
-  });
+  toggleMiniPlayer().catch(() => showStatus("Playback failed", true));
 });
 document.getElementById("mini-player-stop").addEventListener("click", stopCurrentAudio);
-window.addEventListener("pagehide", () => {
-  if (currentAudio) releasePlaybackSession(currentAudio);
-});
 
-function createPlaybackDebugId() {
-  if (window.crypto?.getRandomValues) {
-    const bytes = new Uint8Array(4);
-    window.crypto.getRandomValues(bytes);
-    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0"))
-      .join("")
-      .toUpperCase();
-  }
-  return Math.random().toString(36).slice(2, 10).toUpperCase().padEnd(8, "0");
-}
-
-function playbackClientErrorCode(error, mediaError) {
-  if (error?.playbackCode) return error.playbackCode;
-  if (error?.name === "NotAllowedError") return "P201";
-  if (error?.name === "NotSupportedError") return "P204";
-  const mediaCodes = {
-    1: "P210", // Playback was aborted by the browser.
-    2: "P211", // Browser/network transfer failed.
-    3: "P212", // Browser could not decode the audio.
-    4: "P213", // Browser rejected the source or format.
-  };
-  return mediaCodes[mediaError?.code] || "P299";
-}
-
-async function getServerPlaybackDiagnostic(debugId, fallbackCode) {
-  try {
-    const response = await fetch(`/api/preview-diagnostics/${debugId}`, {
-      cache: "no-store",
-    });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok && data.code && data.code !== "P299") return data.code;
-  } catch (error) {
-    console.warn(`Playback diagnostic lookup failed [${debugId}]:`, error);
-  }
-  return fallbackCode;
-}
-
-async function reportPlaybackFailure(audio, debugId, fallbackCode, error) {
-  if (audio.playbackFailureReported) return;
-  audio.playbackFailureReported = true;
-  window.clearTimeout(audio.playbackStartTimer);
-  const mediaError = audio.error;
-  if (currentAudio === audio) stopCurrentAudio();
-  const code = await getServerPlaybackDiagnostic(debugId, fallbackCode);
-  console.error(`Audio playback failed [${debugId}/${code}]`, {
-    error,
-    mediaErrorCode: mediaError?.code || null,
-    mediaErrorMessage: mediaError?.message || "",
-    networkState: audio.networkState,
-    readyState: audio.readyState,
+function bindAudioLifecycle(audio, button) {
+  audio.playbackStartTimer = window.setTimeout(() => {
+    if (currentAudio !== audio) return;
+    stopCurrentAudio();
+    showStatus("Playback took too long. Please try again.", true);
+  }, 60000);
+  audio.addEventListener("playing", () => {
+    window.clearTimeout(audio.playbackStartTimer);
+    if (currentAudio !== audio) return;
+    setPlayingVisual(!audio.paused);
+    showMiniPlayer(button);
   });
-  showStatus(`Playback failed (${code} · ${debugId})`, true);
+  audio.addEventListener("pause", () => {
+    if (currentAudio === audio) setPlayingVisual(false);
+  });
+  audio.addEventListener("waiting", () => {
+    if (currentAudio !== audio) return;
+    setPlaybackButtonState(currentPlayingButton, "loading");
+    setPlaybackButtonState(document.getElementById("mini-player-toggle"), "loading");
+  });
 }
 
 async function togglePlay(videoId, button) {
-  if (currentPlayingButton === button) {
-    const audio = currentAudio;
-    try {
-      await toggleMiniPlayer();
-    } catch (error) {
-      if (audio) {
-        await reportPlaybackFailure(
-          audio,
-          audio.playbackDebugId || createPlaybackDebugId(),
-          playbackClientErrorCode(error, audio.error),
-          error,
-        );
-      }
-    }
+  const playbackKey = `video:${videoId}`;
+  if (currentAudio && currentPlaybackKey === playbackKey) {
+    currentPlayingButton = button;
+    await toggleMiniPlayer();
     return;
   }
 
@@ -261,29 +257,25 @@ async function togglePlay(videoId, button) {
   setPlaybackButtonState(button, "loading");
 
   try {
-    const debugId = createPlaybackDebugId();
     const audio = new Audio();
     audio.playsInline = true;
     audio.preload = "auto";
-    audio.playbackDebugId = debugId;
     currentAudio = audio;
     currentPlayingButton = button;
+    currentPlaybackKey = playbackKey;
+    bindAudioLifecycle(audio, button);
 
-    audio.playbackStartTimer = window.setTimeout(() => {
-      if (currentAudio !== audio || !audio.paused) return;
-      reportPlaybackFailure(audio, debugId, "P206", new Error("Playback startup timed out"));
-    }, 30000);
-
-    audio.addEventListener("playing", () => {
-      window.clearTimeout(audio.playbackStartTimer);
-    });
+    const handlePlaybackFailure = (error) => {
+      if (currentAudio !== audio) return;
+      console.error("Audio playback error:", error);
+      showStatus("Playback failed", true);
+      stopCurrentAudio();
+    };
 
     audio.addEventListener("loadedmetadata", () => {
       if (currentAudio !== audio) return;
       const isPlaying = !audio.paused;
-      setPlaybackButtonState(button, isPlaying ? "pause" : "play");
-      button.disabled = false;
-      button.closest(".track")?.classList.toggle("is-playing", isPlaying);
+      setPlayingVisual(isPlaying);
       showMiniPlayer(button);
     });
 
@@ -292,53 +284,22 @@ async function togglePlay(videoId, button) {
     });
 
     audio.addEventListener("error", (error) => {
-      if (currentAudio !== audio) return;
-      reportPlaybackFailure(
-        audio,
-        debugId,
-        playbackClientErrorCode(null, audio.error),
-        error,
-      );
+      handlePlaybackFailure(error);
     });
 
-    // Prepare only the raw source audio in the container's private /tmp.
-    // There is no conversion, tagging, lyrics lookup, persistent cache, or database.
-    const response = await fetch(
-      `/api/playback/prepare/${encodeURIComponent(videoId)}?debug_id=${debugId}`,
-      {
-        method: "POST",
-        cache: "no-store",
-      },
-    );
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      const preparationError = new Error(
-        data.detail?.message || "Failed to prepare playback audio",
-      );
-      preparationError.playbackCode = data.detail?.code || "P401";
-      throw preparationError;
-    }
-    if (currentAudio !== audio) {
-      releasePlaybackSessionId(data.session_id);
-      return;
-    }
-    audio.playbackSessionId = data.session_id;
-    audio.src = data.url;
+    // Never expose a short-lived googlevideo URL to the browser. The
+    // server validates a working upstream before returning audio/mpeg.
+    audio.src = `/api/preview/${encodeURIComponent(videoId)}`;
     showMiniPlayer(button);
     await audio.play();
     if (currentAudio !== audio) return;
     button.disabled = false;
-    setPlayingVisual(true);
+    setPlayingVisual(!audio.paused);
     showMiniPlayer(button);
   } catch (error) {
     if (currentPlayingButton !== button) return;
-    const audio = currentAudio;
-    if (!audio) return;
-    await reportPlaybackFailure(
-      audio,
-      audio.playbackDebugId || createPlaybackDebugId(),
-      playbackClientErrorCode(error, audio.error),
-      error,
-    );
+    console.error("Failed to play:", error);
+    showStatus("Failed to start playback: " + error.message, true);
+    stopCurrentAudio();
   }
 }

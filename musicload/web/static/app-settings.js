@@ -1,3 +1,103 @@
+// Reusable in-app confirmation dialog for destructive actions.
+const confirmModal = document.getElementById("confirm-modal");
+const confirmTitle = document.getElementById("confirm-title");
+const confirmMessage = document.getElementById("confirm-message");
+const confirmAction = document.getElementById("confirm-action");
+const confirmCancel = document.getElementById("confirm-cancel");
+const confirmClose = document.getElementById("confirm-close");
+let confirmResolver = null;
+
+function closeConfirmation(confirmed) {
+  confirmModal.classList.remove("active");
+  if (confirmResolver) {
+    confirmResolver(confirmed);
+    confirmResolver = null;
+  }
+}
+
+function askForConfirmation({ title, message, actionLabel = "Delete" }) {
+  confirmTitle.textContent = title;
+  confirmMessage.textContent = message;
+  confirmAction.textContent = actionLabel;
+  confirmModal.classList.add("active");
+  confirmAction.focus();
+  return new Promise((resolve) => {
+    confirmResolver = resolve;
+  });
+}
+
+async function runConfirmedAction({
+  button,
+  title,
+  message,
+  actionLabel = "Delete",
+  pendingLabel = "Deleting...",
+  errorLabel = "Action failed",
+  action,
+}) {
+  const confirmed = await askForConfirmation({ title, message, actionLabel });
+  if (!confirmed) return false;
+
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = pendingLabel;
+  try {
+    await action();
+    return true;
+  } catch (error) {
+    showStatus(`${errorLabel}: ${error.message}`, true);
+    return false;
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel;
+  }
+}
+
+confirmAction.addEventListener("click", () => closeConfirmation(true));
+confirmCancel.addEventListener("click", () => closeConfirmation(false));
+confirmClose.addEventListener("click", () => closeConfirmation(false));
+confirmModal.addEventListener("click", (event) => {
+  if (event.target === confirmModal) closeConfirmation(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && confirmModal.classList.contains("active")) {
+    closeConfirmation(false);
+  }
+});
+
+document.getElementById("queue-list").addEventListener("click", async (event) => {
+  const clearButton = event.target.closest(".clear-job-btn");
+  if (clearButton) {
+    const deleteFile = clearButton.dataset.deleteFile === "true";
+    const title = queueJobs.find((job) => job.id === clearButton.dataset.jobId)?.title || "this download";
+    const removed = await runConfirmedAction({
+      button: clearButton,
+      title: deleteFile ? "Delete downloaded file?" : "Clear download entry?",
+      message: deleteFile
+        ? `Delete "${title}" permanently from your music folder? This cannot be undone.`
+        : `Remove "${title}" from the download history?`,
+      actionLabel: deleteFile ? "Delete File" : "Clear Entry",
+      pendingLabel: deleteFile ? "Deleting..." : "Clearing...",
+      errorLabel: deleteFile ? "Delete failed" : "Clear failed",
+      action: () => removeJob(clearButton.dataset.jobId, deleteFile),
+    });
+    if (removed) showStatus(deleteFile ? `Deleted: ${title}` : `Cleared: ${title}`);
+    return;
+  }
+
+  const cancelButton = event.target.closest(".cancel-job-btn");
+  if (cancelButton) {
+    cancelButton.disabled = true;
+    cancelButton.textContent = "Cancelling...";
+    try {
+      await removeJob(cancelButton.dataset.jobId);
+    } catch (error) {
+      cancelButton.disabled = false;
+      cancelButton.textContent = "Cancel";
+    }
+  }
+});
+
 // Settings and cookie management
 const settingsBtn = document.getElementById("settings-btn");
 const settingsModal = document.getElementById("settings-modal");
@@ -48,7 +148,7 @@ function populateSettings(data) {
 }
 
 async function loadSettings() {
-  const response = await fetch("/api/settings");
+  const response = await fetch("/api/settings", { cache: "no-store" });
   const data = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(data.detail || "Could not load settings");
   populateSettings(data);
@@ -66,6 +166,7 @@ settingsBtn.addEventListener("click", async () => {
     settingsMessage.className = "settings-message error";
   }
 });
+
 settingsClose.addEventListener("click", () => {
   settingsModal.classList.remove("active");
 });
@@ -130,10 +231,15 @@ settingsForm.addEventListener("submit", async (event) => {
       body: JSON.stringify(payload),
     });
     const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.detail || "Could not save settings");
+    if (!response.ok) {
+      const detail = Array.isArray(data.detail)
+        ? data.detail.map((item) => item.msg || String(item)).join(", ")
+        : data.detail;
+      throw new Error(detail || "Could not save settings");
+    }
     populateSettings(data);
     formatSelector.value = data.values.audio_format;
-    localStorage.setItem("audioFormat", data.values.audio_format);
+    saveFormat();
     settingsMessage.textContent = data.message;
     settingsMessage.className = "settings-message success";
   } catch (error) {

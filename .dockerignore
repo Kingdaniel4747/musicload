@@ -30,3 +30,9 @@ docker-compose.yml
 musicload.png
 musicload-logo.svg
 musicload-*-showcase.png
+
+.musicload
+.uv-cache
+.maintenance
+.gitignore
+AGENTS.md

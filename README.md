@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/musicload-mobile-showcase.png" alt="Musicload on three mobile devices showing Library, ListenBrainz and Search" width="100%">
+  <img src="docs/screenshots/musicload-mobile.jpg" alt="Musicload mobile search and mini player with example data" width="390">
 </p>
 
 Musicload was built for a home or family music server where adding one song should not require SSH, manual tagging, or downloading an entire album. It writes finished files directly into your music folder; Navidrome finds them during its normal library scan. No direct Navidrome API connection is required.
@@ -32,7 +32,7 @@ Musicload was built for a home or family music server where adding one song shou
 - **Web UI and CLI:** use the friendly browser interface day to day or automate searches, downloads, exploration, and library tagging from the command line.
 
 <p align="center">
-  <img src="docs/screenshots/musicload-desktop-showcase.png" alt="Musicload desktop interface on a laptop" width="100%">
+  <img src="docs/screenshots/musicload-desktop.jpg" alt="Musicload desktop search and mini player with example data" width="100%">
 </p>
 
 ## Quick start with Docker Compose
@@ -140,6 +140,31 @@ The optional `tag` command can enrich an existing library with missing metadata,
 Musicload is self-hosted. Its application data remains in your configured `/data` volume and downloaded media remains in your own music folder. Keep both locations private and backed up.
 
 Only save media you are authorized to download and follow applicable laws and service terms.
+
+## Development and updates
+
+The web app uses FastAPI, `ytmusicapi` for discovery, `yt-dlp` for extraction,
+and FFmpeg for browser-compatible MP3 previews. Deno handles YouTube's
+JavaScript challenges. Preview playback is temporary and never writes into
+the music library. The PWA remains network-first.
+
+Dependencies are recorded in `uv.lock`; Docker builds use `uv sync --frozen`.
+To update them, run `uv lock --upgrade` and `uv sync --frozen`, then check:
+
+```bash
+uv run python -m compileall musicload
+uv run python -m unittest discover -s tests
+```
+
+The regression tests run without Navidrome or YouTube. The GitHub workflow
+checks Python, JavaScript and the tests before publishing AMD64 and ARM64
+images. Dependabot proposes weekly package, image and workflow updates;
+those proposals still need review and merging.
+
+After upgrading a server, check search, preview, download, library playback
+and a retained Navidrome login. Keep `./.musicload:/data` and the existing
+music mount. Phone launch screens are drawn by the browser/OS; some devices
+need a PWA reinstall to pick up changed launcher icons.
 
 ## License
 

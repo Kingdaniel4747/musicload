@@ -1,0 +1,10 @@
+.venv/
+.uv-cache/
+.maintenance/
+.musicload/
+music/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+*.log

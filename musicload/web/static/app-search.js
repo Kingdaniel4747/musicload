@@ -388,7 +388,7 @@ function updateExploreUrlParams(view, options = {}) {
 
 // Initialize tab from URL
 function initTabFromUrl() {
-  const tab = getQueryParam("tab") || "explore";
+  const tab = getQueryParam("tab") || (getQueryParam("q") ? "songs" : "explore");
   if (tab === "songs" || tab === "albums" || tab === "explore" || tab === "library" || tab === "downloads" || (tab === "listenbrainz" && listenbrainzResults)) {
     setActiveTab(tab);
   }
@@ -490,7 +490,6 @@ function setActiveTab(tab, skipExploreLoad = false) {
     downloadsResults.classList.add("active");
     resultTypeToggle.style.display = "none";
     updateQueueUI(queueJobs);
-    fetchQueue();
   } else if (tab === "listenbrainz" && listenbrainzResults) {
     listenbrainzResults.classList.add("active");
     resultTypeToggle.style.display = "none";
@@ -500,6 +499,9 @@ function setActiveTab(tab, skipExploreLoad = false) {
     resultTypeToggle.style.display = "none";
     loadLogs();
   }
+  // Re-apply the active song marker whenever a view is shown again.
+  // Async renders are covered by the playback MutationObserver as well.
+  requestAnimationFrame(() => syncPlaybackVisuals());
 }
 
 let listenbrainzEventSource = null;
@@ -743,7 +745,7 @@ async function resolveSharedGoogleLink(sharedUrl) {
 async function initAutoSearch() {
   const query = getQueryParam("q");
   const albumId = getQueryParam("album");
-  const tab = getQueryParam("tab") || "explore";
+  const tab = getQueryParam("tab") || (query ? "songs" : "explore");
   const sharedQuery = !query ? getSharedSongQuery() : "";
   const sharedUrl = !query ? getQueryParam("shared_url") : "";
 
@@ -1070,7 +1072,7 @@ function renderAlbums(albums) {
     .map(
       (album) => `
           <div class="album-card">
-              <img class="album-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" onerror="this.style.display='none'">
+              <img class="album-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
               <div class="album-info">
                   <div class="album-title">${escapeHtml(album.title)}</div>
                   <div class="album-artist">${escapeHtml(album.artist)}</div>
@@ -1243,6 +1245,7 @@ function renderResults(tracks) {
     btn.addEventListener("click", handleDownload);
   });
 }
+
 async function handleDownload(e) {
   e.stopPropagation();
   const btn = e.currentTarget;
@@ -1281,21 +1284,6 @@ async function handleDownload(e) {
         return;
       }
       downloadAttention = true;
-      addOptimisticQueueJob({
-        id: data.job_id,
-        video_id: videoId,
-        title,
-        artist,
-        format,
-        status: "queued",
-        progress: 0,
-        speed: "Waiting",
-        eta: "",
-        error: null,
-        file_path: null,
-        created_at: new Date().toISOString(),
-        completed_at: null,
-      });
       btn.dataset.queueJobId = data.job_id;
       renderInlineDownload(btn, {
         id: data.job_id,

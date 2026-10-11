@@ -1,20 +1,20 @@
 [project]
 name = "musicload"
-version = "0.24.0"
+version = "0.25.0"
 description = "Search and download music from YouTube Music with lyrics"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "yt-dlp[default]>=2026.8.4.234419.dev0",
-    "ytmusicapi>=1.8.0",
-    "fastapi>=0.115.0",
-    "jinja2>=3.1.0",
-    "python-multipart>=0.0.18",
-    "uvicorn>=0.34.0",
-    "typer>=0.15.0",
-    "httpx>=0.27.0",
-    "mutagen>=1.47.0",
-    "beautifulsoup4>=4.12.0",
+    "yt-dlp[default]>=2026.10.10.233141.dev0",
+    "ytmusicapi>=1.12.3",
+    "fastapi>=0.143.0",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.32",
+    "uvicorn>=0.54.0",
+    "typer>=0.27.3",
+    "httpx>=0.28.1",
+    "mutagen>=1.48.1",
+    "beautifulsoup4>=4.15.0",
 ]
 
 [project.scripts]

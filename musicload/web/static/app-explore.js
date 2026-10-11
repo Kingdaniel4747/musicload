@@ -57,6 +57,7 @@ async function loadExploreContent() {
 
   renderExploreHome(moods, charts, false, newReleases);
 }
+
 function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = null) {
   if (!skipUrlUpdate) chartPage = 0;
   exploreBreadcrumb = [];
@@ -116,7 +117,7 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
                       (track) => `
                       <div class="track">
                           <div class="track-main">
-                              <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy" onerror="this.style.display='none'">
+                              <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
                               <div class="track-info">
                                   <div class="track-title">${escapeHtml(track.title)}${isUgcVideoType(track.video_type) ? '<span class="ugc-badge">UGC</span>' : ""}</div>
                                   <div class="track-artist">${escapeHtml(track.artist)}</div>
@@ -160,7 +161,7 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
         <div class="new-releases-grid">
           ${pageAlbums.map((album) => `
             <div class="new-release-card">
-              <img class="new-release-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" loading="lazy" onerror="this.style.display='none'">
+              <img class="new-release-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
               <div class="new-release-info">
                 <div class="new-release-title">${escapeHtml(album.title)}${album.is_explicit ? '<span class="explicit-badge">E</span>' : ""}</div>
                 <div class="new-release-artist">${escapeHtml(album.artist)}</div>
@@ -358,7 +359,7 @@ function renderMoodPlaylists(playlists, categoryTitle, params) {
                 .map(
                   (pl) => `
                   <div class="mood-playlist-card" data-playlist-id="${escapeHtml(pl.playlist_id)}" data-title="${escapeHtml(pl.title)}">
-                      <img class="mood-playlist-thumb" src="${proxyImageUrl(pl.thumbnail_url)}" alt="${escapeHtml(pl.title)}" loading="lazy" onerror="this.style.display='none'">
+                      <img class="mood-playlist-thumb" src="${proxyImageUrl(pl.thumbnail_url)}" alt="${escapeHtml(pl.title)}" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
                       <div class="mood-playlist-info">
                           <div class="mood-playlist-title">${escapeHtml(pl.title)}</div>
                           ${pl.author ? `<div class="mood-playlist-author">${escapeHtml(pl.author)}</div>` : ""}
@@ -715,10 +716,10 @@ function isUgcVideoType(videoType) {
 function escapeHtml(text) {
   const div = document.createElement("div");
   div.textContent = text;
-  return div.innerHTML;
+  return div.innerHTML.replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
 
 function proxyImageUrl(url) {
-  if (!url) return "";
+  if (!url) return "/static/musicload-mark.svg";
   return "/api/image-proxy?url=" + encodeURIComponent(url);
 }
