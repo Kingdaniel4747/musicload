@@ -1,12 +1,13 @@
+{% set asset_version = "ui-20261117-4" %}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Sign in · Musicload</title>
-    <link rel="icon" type="image/png" href="/static/favicon.png" />
-    <link rel="stylesheet" href="/static/style.css" />
-    <link rel="stylesheet" href="/static/design.css" />
+    <link rel="icon" type="image/png" href="/static/favicon.png?v={{ asset_version }}" />
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
+    <link rel="stylesheet" href="/static/design.css?v={{ asset_version }}" />
   </head>
   <body class="login-page">
     <main class="login-card">

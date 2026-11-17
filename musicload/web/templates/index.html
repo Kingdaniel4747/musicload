@@ -1,20 +1,21 @@
+{% set asset_version = version ~ "-ui-20261117-4" %}
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>Musicload</title>
-    <link rel="icon" type="image/png" href="/static/favicon.png" />
-    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
-    <link rel="manifest" href="/static/manifest.json" />
+    <link rel="icon" type="image/png" href="/static/favicon.png?v={{ asset_version }}" />
+    <link rel="apple-touch-icon" href="/static/apple-touch-icon.png?v={{ asset_version }}" />
+    <link rel="manifest" href="/static/manifest.json?v={{ asset_version }}" />
     <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)" />
     <!-- iOS/iPadOS: use the full screen when launched from the Home Screen. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
-    <link rel="stylesheet" href="/static/style.css?v={{ version }}" />
-    <link rel="stylesheet" href="/static/design.css?v={{ version }}" />
+    <link rel="stylesheet" href="/static/style.css?v={{ asset_version }}" />
+    <link rel="stylesheet" href="/static/design.css?v={{ asset_version }}" />
   </head>
   <body>
     <a class="skip-link" href="#main-content">Skip to content</a>
@@ -119,11 +120,18 @@
             &times;
           </button>
         </div>
-        <button id="format-selector-button" class="format-selector format-selector-button" type="button"
-          aria-label="Choose audio format" aria-haspopup="dialog" aria-controls="format-modal">
-          <span id="format-selector-label">Opus</span>
-          <span class="format-selector-chevron" aria-hidden="true">⌄</span>
-        </button>
+        <div class="format-control">
+          <button id="format-selector-button" class="format-selector format-selector-button" type="button"
+            aria-label="Choose audio format" aria-haspopup="listbox" aria-expanded="false" aria-controls="format-dropdown">
+            <span id="format-selector-label">Opus</span>
+            <span class="format-selector-chevron" aria-hidden="true">⌄</span>
+          </button>
+          <div id="format-dropdown" class="format-dropdown" role="listbox" aria-label="Audio format" hidden>
+            <button type="button" class="format-option" data-format="opus" role="option" aria-selected="true" tabindex="-1">Opus</button>
+            <button type="button" class="format-option" data-format="mp3" role="option" aria-selected="false" tabindex="-1">MP3</button>
+            <button type="button" class="format-option" data-format="flac" role="option" aria-selected="false" tabindex="-1">FLAC</button>
+          </div>
+        </div>
         <button type="submit">Search</button>
       </form>
       <div id="app-status" class="status" role="status" aria-live="polite" hidden></div>
@@ -377,41 +385,13 @@
       </div>
     </div>
 
-    <div id="format-modal" class="modal format-modal" role="dialog" aria-modal="true" aria-labelledby="format-modal-title">
-      <div class="modal-content format-modal-content">
-        <div class="modal-header">
-          <div>
-            <h2 id="format-modal-title">Audio format</h2>
-            <p>Choose the file format for new downloads.</p>
-          </div>
-          <button id="format-modal-close" class="modal-close" aria-label="Close format selection">&times;</button>
-        </div>
-        <div class="modal-body">
-          <div class="format-options" role="radiogroup" aria-label="Audio format">
-            <button type="button" class="format-option" data-format="opus" role="radio" aria-checked="false">
-              <span><strong>Opus</strong><small>Compact files with excellent quality</small></span>
-              <span class="format-option-check" aria-hidden="true">✓</span>
-            </button>
-            <button type="button" class="format-option" data-format="mp3" role="radio" aria-checked="false">
-              <span><strong>MP3</strong><small>Best compatibility with most players</small></span>
-              <span class="format-option-check" aria-hidden="true">✓</span>
-            </button>
-            <button type="button" class="format-option" data-format="flac" role="radio" aria-checked="false">
-              <span><strong>FLAC</strong><small>Lossless audio with larger files</small></span>
-              <span class="format-option-check" aria-hidden="true">✓</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <script src="/static/app-core.js?v={{ version }}" data-is-admin="{{ is_admin | tojson }}" data-default-audio-format="{{ default_audio_format }}" defer></script>
-    <script src="/static/app-search.js?v={{ version }}" defer></script>
-    <script src="/static/app-downloads.js?v={{ version }}" defer></script>
-    <script src="/static/app-settings.js?v={{ version }}" defer></script>
-    <script src="/static/app-explore.js?v={{ version }}" defer></script>
-    <script src="/static/app-library.js?v={{ version }}" defer></script>
-    <script src="/static/app-text.js?v={{ version }}" defer></script>
-    <script src="/static/app-init.js?v={{ version }}" defer></script>
+    <script src="/static/app-core.js?v={{ asset_version }}" data-is-admin="{{ is_admin | tojson }}" data-default-audio-format="{{ default_audio_format }}" defer></script>
+    <script src="/static/app-search.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-downloads.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-settings.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-explore.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-library.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-text.js?v={{ asset_version }}" defer></script>
+    <script src="/static/app-init.js?v={{ asset_version }}" defer></script>
   </body>
 </html>

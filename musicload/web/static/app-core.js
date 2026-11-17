@@ -9,64 +9,97 @@ if ("serviceWorker" in navigator) {
   });
 }
 
-// Format management
+// Format management: an anchored dropdown, without a modal or page overlay.
 const formatSelector = document.getElementById("format-selector");
 const formatSelectorButton = document.getElementById("format-selector-button");
 const formatSelectorLabel = document.getElementById("format-selector-label");
-const formatModal = document.getElementById("format-modal");
-const formatModalClose = document.getElementById("format-modal-close");
+const formatDropdown = document.getElementById("format-dropdown");
+const formatOptions = [...(formatDropdown?.querySelectorAll(".format-option") || [])];
 const serverDefaultAudioFormat = appScript.dataset.defaultAudioFormat;
 
 function renderFormatSelection() {
-  const selectedOption = formatSelector.options[formatSelector.selectedIndex];
-  formatSelectorLabel.textContent = selectedOption?.textContent || "Opus";
-  document.querySelectorAll(".format-option").forEach((button) => {
-    const isSelected = button.dataset.format === formatSelector.value;
-    button.classList.toggle("selected", isSelected);
-    button.setAttribute("aria-checked", String(isSelected));
+  formatSelectorLabel.textContent = formatSelector.options[formatSelector.selectedIndex]?.textContent || "Opus";
+  formatOptions.forEach((button) => {
+    button.setAttribute("aria-selected", String(button.dataset.format === formatSelector.value));
   });
 }
 
 function initFormat() {
-  const savedFormat = localStorage.getItem("audioFormat") || serverDefaultAudioFormat || "opus";
-  formatSelector.value = savedFormat;
+  let savedFormat;
+  try {
+    savedFormat = localStorage.getItem("audioFormat");
+  } catch {
+    // Browser privacy settings may disable storage, including in installed PWAs.
+  }
+  formatSelector.value = savedFormat || serverDefaultAudioFormat || "opus";
   if (!formatSelector.value) formatSelector.value = "opus";
   renderFormatSelection();
 }
 
 function saveFormat() {
-  localStorage.setItem("audioFormat", formatSelector.value);
+  try {
+    localStorage.setItem("audioFormat", formatSelector.value);
+  } catch {
+    // Keep the selected format for this page even when it cannot be persisted.
+  }
   renderFormatSelection();
 }
 
-function openFormatModal() {
-  renderFormatSelection();
-  formatModal.classList.add("active");
-  formatModal.querySelector(".format-option.selected")?.focus();
-}
-
-function closeFormatModal({ restoreFocus = true } = {}) {
-  formatModal.classList.remove("active");
+function closeFormatDropdown(restoreFocus = false) {
+  if (!formatDropdown) return;
+  formatDropdown.hidden = true;
+  formatSelectorButton.setAttribute("aria-expanded", "false");
   if (restoreFocus) formatSelectorButton.focus();
 }
 
+function openFormatDropdown() {
+  if (!formatDropdown) return;
+  formatDropdown.hidden = false;
+  formatSelectorButton.setAttribute("aria-expanded", "true");
+  formatOptions.find((button) => button.dataset.format === formatSelector.value)?.focus();
+}
+
 formatSelector.addEventListener("change", saveFormat);
-formatSelectorButton.addEventListener("click", openFormatModal);
-formatModalClose.addEventListener("click", () => closeFormatModal());
-formatModal.addEventListener("click", (event) => {
-  if (event.target === formatModal) closeFormatModal();
+formatSelectorButton.addEventListener("click", () => {
+  if (formatDropdown?.hidden) openFormatDropdown();
+  else closeFormatDropdown();
 });
-formatModal.querySelectorAll(".format-option").forEach((button) => {
+formatSelectorButton.addEventListener("keydown", (event) => {
+  if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+    event.preventDefault();
+    openFormatDropdown();
+  }
+});
+formatOptions.forEach((button) => {
   button.addEventListener("click", () => {
     formatSelector.value = button.dataset.format;
     saveFormat();
-    closeFormatModal();
+    closeFormatDropdown(true);
   });
 });
-document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && formatModal.classList.contains("active")) {
-    closeFormatModal();
+formatDropdown?.addEventListener("keydown", (event) => {
+  const index = formatOptions.indexOf(document.activeElement);
+  let next;
+  if (event.key === "ArrowDown") next = (index + 1) % formatOptions.length;
+  if (event.key === "ArrowUp") next = (index - 1 + formatOptions.length) % formatOptions.length;
+  if (event.key === "Home") next = 0;
+  if (event.key === "End") next = formatOptions.length - 1;
+  if (next !== undefined) {
+    event.preventDefault();
+    formatOptions[next].focus();
   }
+});
+document.addEventListener("click", (event) => {
+  if (!formatSelectorButton.parentElement.contains(event.target)) closeFormatDropdown();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && formatDropdown && !formatDropdown.hidden) {
+    event.preventDefault();
+    closeFormatDropdown(true);
+  }
+});
+formatSelectorButton.parentElement.addEventListener("focusout", (event) => {
+  if (!formatSelectorButton.parentElement.contains(event.relatedTarget)) closeFormatDropdown();
 });
 initFormat();
 

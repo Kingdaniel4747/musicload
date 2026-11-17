@@ -81,6 +81,7 @@ function updateSearchContext() {
   searchInput.setAttribute("aria-label", searchInput.placeholder);
   const isLocalSearch = currentTab === "library";
   formatSelectorButton.hidden = isLocalSearch;
+  closeFormatDropdown();
   searchForm.classList.toggle("local-search", isLocalSearch);
 }
 

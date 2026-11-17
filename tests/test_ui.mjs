@@ -60,6 +60,7 @@ function app() {
   const context = vm.createContext({
     document, window, console, URL, URLSearchParams, isAdmin: true,
     formatSelectorButton: get('format-selector-button'),
+    closeFormatDropdown() {},
     setTimeout: () => 1, clearTimeout() {}, requestAnimationFrame() {},
     syncPlaybackVisuals() {}, loadExploreContent() {}, loadLibraryContent() {},
     escapeHtml: (value) => String(value ?? ''),

@@ -20,11 +20,20 @@ function scheduleQueuePoll(delay = 2000) {
 
 function initQueue() {
   if (eventSource) eventSource.close();
+  eventSource = null;
   if (queueReconnectTimer) clearTimeout(queueReconnectTimer);
   clearQueuePoll();
 
   // Connect to SSE endpoint for real-time updates
-  const source = new EventSource("/api/queue/stream");
+  let source;
+  try {
+    source = new EventSource("/api/queue/stream");
+  } catch {
+    // Browsers may block streaming; polling must not prevent the page starting.
+    fetchQueue();
+    scheduleQueuePoll();
+    return;
+  }
   eventSource = source;
 
   source.onmessage = (event) => {
