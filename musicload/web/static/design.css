@@ -167,7 +167,7 @@ header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px;
 .cancel-all-btn:hover, .remove-btn:hover:not(:disabled), .clear-job-btn:hover, .cancel-job-btn:hover, .library-delete-btn:hover:not(:disabled), .btn-danger:hover { color: var(--error-text); background: var(--error-bg); }
 .download-btn.inline-download-progress, .progress-action-btn { background: var(--accent-soft); color: var(--text-primary); }
 .button-progress-fill { background: color-mix(in srgb, var(--accent-primary) 25%, transparent); }
-.track.is-playing { background: var(--accent-soft) !important; border-color: var(--border-color) !important; box-shadow: inset 3px 0 var(--accent-primary) !important; transform: none; }
+.track.is-playing { border-radius: 14px; overflow: hidden; background: var(--accent-soft) !important; border-color: var(--border-color) !important; box-shadow: inset 3px 0 var(--accent-primary) !important; transform: none; }
 .play-btn[data-playback-state="pause"]:focus-visible { outline: 2px solid var(--text-primary) !important; outline-offset: 3px !important; }
 .album-card, .new-release-card, .mood-playlist-card { background: transparent; border: 0; border-radius: 10px; overflow: hidden; box-shadow: none; }
 .album-card:hover, .new-release-card:hover, .mood-playlist-card:hover { transform: none; background: var(--bg-secondary); box-shadow: none; }
@@ -196,8 +196,9 @@ header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px;
 .status:not([hidden]) { display: block; padding: 14px 18px; margin: 0 0 24px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); color: var(--text-primary); }
 .status.error { color: var(--error-text); background: var(--error-bg); border-color: var(--error-text); }
 .status:empty { display: none; }
-.mini-player { background: var(--glass-bg); color: var(--text-primary); border-color: var(--border-color); border-radius: 16px; box-shadow: 0 8px 36px #0002; backdrop-filter: blur(20px); }
-.mini-player-stop { color: var(--text-secondary); min-height: 44px; }
+.mini-player { grid-template-columns: 48px minmax(0, 1fr) 40px 44px; background: var(--glass-bg); color: var(--text-primary); border-color: var(--border-color); border-radius: 16px; box-shadow: 0 8px 36px #0002; backdrop-filter: blur(20px); }
+.mini-player-stop { display: grid; place-items: center; align-self: center; width: 44px; height: 44px; min-height: 44px; margin: 0; padding: 0; color: var(--text-secondary); line-height: 0; }
+.mini-player-stop svg { display: block; width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2.5; stroke-linecap: round; }
 .logs-output { color: var(--text-primary); background: var(--bg-secondary); }
 body.login-page { padding: 24px; background: var(--bg-secondary); }
 .login-card { background: var(--bg-primary); border: 1px solid var(--border-color); box-shadow: 0 12px 48px #0000000a; padding: 36px; }
