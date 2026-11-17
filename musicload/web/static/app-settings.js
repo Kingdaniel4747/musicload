@@ -65,39 +65,6 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-document.getElementById("queue-list").addEventListener("click", async (event) => {
-  const clearButton = event.target.closest(".clear-job-btn");
-  if (clearButton) {
-    const deleteFile = clearButton.dataset.deleteFile === "true";
-    const title = queueJobs.find((job) => job.id === clearButton.dataset.jobId)?.title || "this download";
-    const removed = await runConfirmedAction({
-      button: clearButton,
-      title: deleteFile ? "Delete downloaded file?" : "Clear download entry?",
-      message: deleteFile
-        ? `Delete "${title}" permanently from your music folder? This cannot be undone.`
-        : `Remove "${title}" from the download history?`,
-      actionLabel: deleteFile ? "Delete File" : "Clear Entry",
-      pendingLabel: deleteFile ? "Deleting..." : "Clearing...",
-      errorLabel: deleteFile ? "Delete failed" : "Clear failed",
-      action: () => removeJob(clearButton.dataset.jobId, deleteFile),
-    });
-    if (removed) showStatus(deleteFile ? `Deleted: ${title}` : `Cleared: ${title}`);
-    return;
-  }
-
-  const cancelButton = event.target.closest(".cancel-job-btn");
-  if (cancelButton) {
-    cancelButton.disabled = true;
-    cancelButton.textContent = "Cancelling...";
-    try {
-      await removeJob(cancelButton.dataset.jobId);
-    } catch (error) {
-      cancelButton.disabled = false;
-      cancelButton.textContent = "Cancel";
-    }
-  }
-});
-
 // Settings and cookie management
 const settingsBtn = document.getElementById("settings-btn");
 const settingsModal = document.getElementById("settings-modal");

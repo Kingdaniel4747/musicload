@@ -36,19 +36,22 @@ class Element {
 function app() {
   const elements = new Map();
   const get = (id) => {
+    if (['downloads-btn', 'downloads-results', 'queue-list', 'queue-section', 'cancel-all-btn', 'page-title', 'page-description'].includes(id)) return null;
     if (!elements.has(id)) elements.set(id, new Element(id));
     return elements.get(id);
   };
-  const tabs = ['explore', 'library', 'downloads', 'listenbrainz'];
+  const tabs = ['explore', 'library', 'listenbrainz'];
   const desktop = tabs.map((tab) => get(`${tab}-btn`));
   const mobile = tabs.map((tab) => Object.assign(new Element(), { dataset: { mobileTab: tab } }));
-  const badges = [new Element(), new Element()];
+  const download = new Element();
+  download.dataset.videoId = 'song-id';
   const document = {
     getElementById: get,
+    addEventListener() {},
     querySelectorAll: (selector) => {
       if (selector === '.mobile-nav-btn') return mobile;
       if (selector === '.header-controls > .icon-btn, #logs-btn') return [...desktop, get('logs-btn')];
-      if (selector === '.queue-count') return badges;
+      if (selector === '.download-btn[data-video-id]') return [download];
       return [];
     },
     querySelector: (selector) => selector.includes('data-mobile-tab') ? mobile[2] : get('search-submit'),
@@ -61,11 +64,11 @@ function app() {
     syncPlaybackVisuals() {}, loadExploreContent() {}, loadLibraryContent() {},
     escapeHtml: (value) => String(value ?? ''),
   });
-  for (const file of ['app-search.js', 'app-downloads.js']) {
+  for (const file of ['app-search.js', 'app-downloads.js', 'app-settings.js']) {
     vm.runInContext(readFileSync(new URL(`../musicload/web/static/${file}`, import.meta.url), 'utf8'), context, { filename: file });
   }
   const run = (code) => vm.runInContext(code, context);
-  return { get, run, mobile, badges, window };
+  return { get, run, mobile, download, window, document };
 }
 
 test('errors and empty search results are visible and can be cleared', () => {
@@ -88,26 +91,33 @@ test('section navigation clears stale filters and synchronizes desktop and mobil
   assert.equal(get('library-btn').attributes['aria-current'], 'page');
   assert.equal(mobile[1].attributes['aria-current'], 'page');
   assert.equal(get('format-selector-button').hidden, true);
-  get('downloads-btn').click();
-  assert.equal(get('page-title').textContent, 'Downloads');
-  assert.equal(get('search-form').style.display, '');
-  assert.equal(get('library-btn').attributes['aria-current'], undefined);
   get('explore-btn').click();
+  assert.equal(get('library-btn').attributes['aria-current'], undefined);
   assert.equal(get('format-selector-button').hidden, false);
 });
 
-test('queue counts active jobs and the empty state returns to discovery', () => {
-  const { get, run, badges } = app();
-  run('updateQueueUI([{id:"1", status:"queued", title:"Song", artist:"Artist", created_at:"2026-01-01"}, {id:"2", status:"completed", title:"Done", artist:"Artist", created_at:"2026-01-01"}])');
-  assert.equal(badges[0].textContent, '1');
-  assert.equal(badges[1].hidden, false);
-  assert.equal(get('cancel-all-btn').hidden, false);
-  run('setActiveTab("downloads"); updateQueueUI([])');
-  assert.equal(badges[0].hidden, true);
-  assert.equal(get('cancel-all-btn').hidden, true);
-  get('downloads-explore-btn').click();
-  assert.equal(get('page-title').textContent, 'Explore');
-  assert.equal(get('search-input').focused, true);
+test('download progress and cancellation remain on song buttons without a Downloads view', () => {
+  const { run, download } = app();
+  run('updateQueueUI([{id:"1", video_id:"song-id", status:"downloading", progress:42, title:"Song", artist:"Artist", created_at:"2026-01-01"}])');
+  assert.equal(download.dataset.queueJobId, '1');
+  assert.equal(download.dataset.progressDetails, '42.0%');
+  assert.match(download.innerHTML, /Cancel/);
+  run('updateQueueUI([{id:"1", video_id:"song-id", status:"completed", title:"Song", artist:"Artist", created_at:"2026-01-01"}])');
+  assert.equal(download.dataset.queueJobId, undefined);
+  assert.equal(download.classList.contains('inline-download-progress'), false);
+  assert.equal(download.disabled, false);
+  run('updateQueueUI([])');
+});
+
+test('old Downloads bookmarks return to Explore without accessing removed elements', () => {
+  const { get, run, document, window } = app();
+  run('setActiveTab("downloads")');
+  assert.equal(document.title, 'Explore · Musicload');
+  assert.equal(get('explore-results').classList.contains('active'), true);
+  window.location = new URL('http://localhost/?tab=downloads&q=stale');
+  window.popstate();
+  assert.equal(get('search-input').value, '');
+  assert.equal(get('explore-btn').attributes['aria-current'], 'page');
 });
 
 test('browser history restores a local filter before loading the library', () => {

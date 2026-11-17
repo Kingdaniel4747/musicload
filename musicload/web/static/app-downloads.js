@@ -77,40 +77,20 @@ async function fetchQueue() {
   return queueFetchInFlight;
 }
 
+// Downloads stay on the song buttons; no separate Downloads view is needed.
 function updateQueueUI(jobs) {
-  const queueList = document.getElementById("queue-list");
-  const queueSection = document.getElementById("queue-section");
-  jobs = [...jobs].sort(
+  queueJobs = [...jobs].sort(
     (left, right) => new Date(right.created_at) - new Date(left.created_at),
   );
-  queueJobs = jobs;
-  const activeCount = jobs.filter((job) => ["queued", "downloading"].includes(job.status)).length;
-  document.querySelectorAll(".queue-count").forEach((badge) => {
-    badge.textContent = String(activeCount);
-    badge.hidden = activeCount === 0;
-    badge.setAttribute("aria-label", `${activeCount} active downloads`);
-  });
-  document.getElementById("cancel-all-btn").hidden = activeCount === 0;
-  const activeJobsByVideo = new Map(jobs.filter((job) => ["queued", "downloading"].includes(job.status)).map((job) => [job.video_id, job]));
-  const jobsById = new Map(jobs.map((job) => [job.id, job]));
-  // Some reverse proxies keep the SSE connection open but buffer its
-  // events. Poll while work is active so queued/completed cards still
-  // appear without a page refresh; SSE remains the fast primary path.
-  if (jobs.some((job) => ["queued", "downloading"].includes(job.status))) {
-    scheduleQueuePoll(1500);
-  } else if (!eventSource) {
-    scheduleQueuePoll(5000);
-  } else {
-    clearQueuePoll();
-  }
-  const shouldGlow = currentTab !== "downloads" && downloadAttention;
-  document.getElementById("downloads-btn").classList.toggle(
-    "download-active",
-    shouldGlow,
+  const activeJobsByVideo = new Map(
+    queueJobs.filter((job) => ["queued", "downloading"].includes(job.status))
+      .map((job) => [job.video_id, job]),
   );
-  document
-    .querySelector('[data-mobile-tab="downloads"]')
-    .classList.toggle("download-active", shouldGlow);
+  const jobsById = new Map(queueJobs.map((job) => [job.id, job]));
+  // Poll while work is active because some proxies buffer SSE events.
+  if (activeJobsByVideo.size) scheduleQueuePoll(1500);
+  else if (!eventSource) scheduleQueuePoll(5000);
+  else clearQueuePoll();
 
   document.querySelectorAll(".download-btn[data-video-id]").forEach((button) => {
     const job = jobsById.get(button.dataset.queueJobId) || activeJobsByVideo.get(button.dataset.videoId);
@@ -120,121 +100,4 @@ function updateQueueUI(jobs) {
       resetInlineDownloadButton(button);
     }
   });
-
-  queueSection.style.display = "block";
-  const query = currentTab === "downloads" ? searchInput.value.trim().toLowerCase() : "";
-  const signature = JSON.stringify([jobs, query]);
-  if (queueList.renderSignature === signature) return;
-  queueList.renderSignature = signature;
-  if (jobs.length === 0) {
-    queueList.innerHTML = `
-      <div class="downloads-empty">
-        <strong>No downloads yet</strong>
-        <span>Download a song or album from Explore or Search to see it here.</span>
-        <button type="button" class="empty-action" id="downloads-explore-btn">Find music</button>
-      </div>`;
-    document.getElementById("downloads-explore-btn").addEventListener("click", () => {
-      document.getElementById("explore-btn").click();
-      searchInput.focus();
-    });
-    return;
-  }
-
-  const visibleJobs = query
-    ? jobs.filter((job) => `${job.title} ${job.artist}`.toLowerCase().includes(query))
-    : jobs;
-
-  if (visibleJobs.length === 0) {
-    queueList.innerHTML = `
-      <div class="downloads-empty">
-        <strong>No matching downloads</strong>
-        <span>Try a different title or artist.</span>
-      </div>`;
-    return;
-  }
-
-  queueList.innerHTML = visibleJobs
-    .map((job) => {
-      const statusClass = job.status.toLowerCase();
-      let jobMetricsHtml = "";
-      let actionsHtml = "";
-
-      if (job.status === "queued" || job.status === "downloading") {
-        jobMetricsHtml = `<span class="job-progress-details">${escapeHtml(progressDetails(job))}</span>`;
-      }
-
-      if (job.status === "completed" && job.file_path) {
-        actionsHtml = `
-                  <a href="/api/download-file/${encodeURIComponent(job.file_path)}" class="download-file-btn" download>
-                      💾 Save to Computer
-                  </a>
-              `;
-      }
-
-      if (isAdmin && (job.status === "completed" || job.status === "failed")) {
-        actionsHtml += `
-                  <button class="clear-job-btn" data-job-id="${job.id}" data-delete-file="${Boolean(job.file_path)}">${job.file_path ? "Delete File" : "Clear"}</button>
-              `;
-      }
-
-      if (job.status === "queued" || job.status === "downloading") {
-        actionsHtml += `
-                  <button class="cancel-job-btn progress-action-btn" data-job-id="${job.id}">${progressActionMarkup(job, "Cancel")}</button>
-              `;
-      }
-
-      const errorHtml = job.error
-        ? `<div class="job-error">${escapeHtml(job.error)}</div>`
-        : "";
-
-      return `
-              <div class="job-card ${statusClass}">
-                  <div class="job-header">
-                      <div class="job-info">
-                          <span class="job-title">${escapeHtml(job.title)}</span>
-                          <span class="job-artist">${escapeHtml(job.artist)}</span>
-                      </div>
-                      <span class="job-state">
-                        <span class="job-status status-${statusClass}">${job.status.toUpperCase()}</span>
-                        ${jobMetricsHtml}
-                      </span>
-                  </div>
-                  ${errorHtml}
-                  ${actionsHtml}
-              </div>
-          `;
-    })
-    .join("");
-
 }
-
-async function removeJob(jobId, deleteFile = false) {
-  try {
-    const response = await fetch(
-      `/api/queue/${jobId}?delete_file=${deleteFile}`,
-      { method: "DELETE" },
-    );
-    if (!response.ok) {
-      const data = await response.json().catch(() => ({}));
-      throw new Error(data.detail || "Request failed");
-    }
-  } catch (error) {
-    console.error("Failed to remove job:", error);
-    throw error;
-  }
-}
-
-async function cancelAllDownloads() {
-  const button = document.getElementById("cancel-all-btn");
-  button.disabled = true;
-  try {
-    const response = await fetch("/api/queue/cancel-all", { method: "POST" });
-    if (!response.ok) throw new Error("Cancellation failed");
-  } catch (error) {
-    showStatus("Failed to cancel downloads", true);
-  } finally {
-    button.disabled = false;
-  }
-}
-
-document.getElementById("cancel-all-btn").addEventListener("click", cancelAllDownloads);
