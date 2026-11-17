@@ -23,7 +23,6 @@
         <div class="header-content">
           <div class="header-title">
             <h1><img class="brand-mark" src="/static/musicload-mark.svg" alt="" />Musicload <span class="version">v{{ version }}</span></h1>
-            <p>Search and download music from YouTube Music</p>
           </div>
           <div class="header-controls">
             <button
@@ -53,14 +52,6 @@
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg><span class="nav-label">ListenBrainz</span>
             </button>
             {% endif %}
-            <button
-              id="downloads-btn"
-              class="icon-btn downloads-tab-btn"
-              aria-label="Downloads"
-              title="Downloads"
-            >
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg><span class="nav-label">Downloads</span><span class="queue-count" hidden></span>
-            </button>
             <div class="utility-controls">
             <button
               id="settings-btn"
@@ -96,11 +87,6 @@
       </header>
 
       <main id="main-content" tabindex="-1">
-      <div class="page-heading">
-        <p class="eyebrow">YOUR MUSIC, AT HOME</p>
-        <h2 id="page-title">Explore</h2>
-        <p id="page-description">Find your next favorite. Preview it, then add it to your library.</p>
-      </div>
       <form id="search-form" class="search-form" role="search" aria-label="Search music">
         <select
           id="format-selector"
@@ -145,19 +131,6 @@
       <div class="search-tabs" id="result-type-toggle" style="display: none">
         <button class="tab-btn active" data-tab="songs">Songs</button>
         <button class="tab-btn" data-tab="albums">Albums</button>
-      </div>
-
-      <div id="downloads-results" class="downloads-section">
-        <!-- Queue Section -->
-        <div id="queue-section" class="queue-section">
-          <div class="queue-header">
-            <h2>Queue</h2>
-            <div class="queue-header-actions">
-              <button id="cancel-all-btn" class="cancel-all-btn">Cancel All</button>
-            </div>
-          </div>
-          <div id="queue-list" class="queue-list"></div>
-        </div>
       </div>
 
       <div id="songs-results" class="results"></div>
@@ -216,7 +189,7 @@
       <button id="mini-player-stop" class="mini-player-stop" aria-label="Stop playback" title="Stop"><span aria-hidden="true">×</span></button>
     </div>
 
-    <nav class="mobile-nav{% if listenbrainz_enabled and is_admin %} mobile-nav-four{% elif listenbrainz_enabled or is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
+    <nav class="mobile-nav" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
         <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5Z"/></svg></span><span>Explore</span>
       </button>
@@ -228,9 +201,6 @@
         <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg></span><span>ListenBrainz</span>
       </button>
       {% endif %}
-      <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
-        <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg><span class="queue-count" hidden></span></span><span>Downloads</span>
-      </button>
     </nav>
 
     <!-- Application settings and cookie management -->

@@ -30,12 +30,6 @@ function clearSearch() {
     return;
   }
 
-  if (currentTab === "downloads") {
-    showStatus("");
-    updateQueueUI(queueJobs);
-    return;
-  }
-
   // Clear results and return to Explore.
   songsResults.innerHTML = "";
   albumsResults.innerHTML = "";
@@ -47,7 +41,6 @@ function clearSearch() {
 // Event listeners for clear button
 searchInput.addEventListener("input", () => {
   updateClearButtonVisibility();
-  if (currentTab === "downloads") updateQueueUI(queueJobs);
 });
 searchClearBtn.addEventListener("click", clearSearch);
 
@@ -70,7 +63,6 @@ let libraryDuplicateData = null;
 const LIBRARY_PAGE_SIZE = 30;
 let currentTab = "explore";
 let queueJobs = [];
-let downloadAttention = false;
 let viewingAlbum = null; // Tracks current album view mode { id, title, query }
 
 function updateSearchContext() {
@@ -79,16 +71,15 @@ function updateSearchContext() {
     songs: "Search music, artists, albums, or paste a URL...",
     albums: "Search albums or paste a URL...",
     library: "Search local files...",
-    downloads: "Search downloads...",
     listenbrainz: "Search music, artists, or albums...",
     logs: "Application logs",
   };
   searchInput.placeholder = placeholders[currentTab] || placeholders.explore;
-  const searchLabel = currentTab === "library" ? "Search local files" : currentTab === "downloads" ? "Filter downloads" : "Search music";
+  const searchLabel = currentTab === "library" ? "Search local files" : "Search music";
   searchInput.setAttribute("aria-label", searchLabel);
   searchForm.setAttribute("aria-label", searchLabel);
   searchInput.setAttribute("aria-label", searchInput.placeholder);
-  const isLocalSearch = ["library", "downloads"].includes(currentTab);
+  const isLocalSearch = currentTab === "library";
   formatSelectorButton.hidden = isLocalSearch;
   searchForm.classList.toggle("local-search", isLocalSearch);
 }
@@ -117,10 +108,6 @@ document.getElementById("library-btn").addEventListener("click", () => openSecti
 
 document.getElementById("explore-btn").addEventListener("click", () => {
   openSection("explore");
-});
-
-document.getElementById("downloads-btn").addEventListener("click", () => {
-  openSection("downloads");
 });
 
 const listenbrainzButton = document.getElementById("listenbrainz-btn");
@@ -407,7 +394,6 @@ function initTabFromUrl() {
 
 // Set active tab (updates UI and currentTab variable)
 const exploreResults = document.getElementById("explore-results");
-const downloadsResults = document.getElementById("downloads-results");
 const resultTypeToggle = document.getElementById("result-type-toggle");
 
 async function loadLogs(silent = false) {
@@ -447,25 +433,18 @@ async function loadLogs(silent = false) {
 }
 
 function setActiveTab(tab, skipExploreLoad = false) {
+  // Old bookmarks remain usable after removing the Downloads view.
+  if (tab === "downloads") tab = "explore";
   if (tab !== "listenbrainz") closeListenBrainzStream();
   currentTab = tab;
   showStatus("");
-  if (tab === "downloads") downloadAttention = false;
   updateSearchContext();
   const activeMobileTab = ["songs", "albums"].includes(tab) ? "explore" : tab;
-  const pageContent = {
-    explore: ["Explore", "Find your next favorite. Preview it, then add it to your library."],
-    songs: ["Search", "Listen first. Download the songs you want to keep."],
-    albums: ["Search", "Find a complete album and add it to your library."],
-    library: ["Library", "Your music, ready to play. Browse and manage your local files."],
-    downloads: ["Downloads", "Follow your downloads. Completed music is saved to your library."],
-    listenbrainz: ["For you", "Discover your ListenBrainz recommendations and plan your next downloads."],
-    logs: ["Activity logs", "Check recent application activity and connection details."],
+  const pageTitles = {
+    explore: "Explore", songs: "Search", albums: "Search",
+    library: "Library", listenbrainz: "ListenBrainz", logs: "Activity logs",
   };
-  const [title, description] = pageContent[tab] || pageContent.explore;
-  document.getElementById("page-title").textContent = title;
-  document.getElementById("page-description").textContent = description;
-  document.title = `${title} · Musicload`;
+  document.title = `${pageTitles[tab] || "Explore"} · Musicload`;
   document.querySelectorAll(".header-controls > .icon-btn, #logs-btn").forEach((button) => {
     const active = button.id === `${activeMobileTab}-btn`;
     button.classList.toggle("active", active);
@@ -489,7 +468,6 @@ function setActiveTab(tab, skipExploreLoad = false) {
   albumsResults.classList.remove("active");
   exploreResults.classList.remove("active");
   libraryResults.classList.remove("active");
-  downloadsResults.classList.remove("active");
   if (listenbrainzResults) listenbrainzResults.classList.remove("active");
   if (logsResults) logsResults.classList.remove("active");
 
@@ -499,7 +477,7 @@ function setActiveTab(tab, skipExploreLoad = false) {
   document.querySelector("#search-form button[type='submit']").disabled = false;
   document.getElementById("search-form").classList.remove("search-disabled");
   document.getElementById("search-form").style.display =
-    ["explore", "library", "songs", "albums", "downloads"].includes(tab) ? "" : "none";
+    ["explore", "library", "songs", "albums"].includes(tab) ? "" : "none";
 
   if (tab === "songs") {
     songsResults.classList.add("active");
@@ -519,10 +497,6 @@ function setActiveTab(tab, skipExploreLoad = false) {
     if (!skipExploreLoad) {
       loadLibraryContent();
     }
-  } else if (tab === "downloads") {
-    downloadsResults.classList.add("active");
-    resultTypeToggle.style.display = "none";
-    updateQueueUI(queueJobs);
   } else if (tab === "listenbrainz" && listenbrainzResults) {
     listenbrainzResults.classList.add("active");
     resultTypeToggle.style.display = "none";
@@ -812,9 +786,7 @@ async function initAutoSearch() {
   }
 
   if (tab === "downloads") {
-    searchInput.value = query || "";
-    updateClearButtonVisibility();
-    setActiveTab("downloads");
+    openSection("explore");
     return;
   }
 
@@ -1002,13 +974,8 @@ searchForm.addEventListener("submit", async (e) => {
     return;
   }
 
-  if (currentTab === "downloads") {
-    updateQueueUI(queueJobs);
-    return;
-  }
-
   // Search from Explore in Songs; keep Albums selected when already active.
-  const targetTab = (currentTab === "explore" || currentTab === "downloads") ? "songs" : currentTab;
+  const targetTab = currentTab === "explore" ? "songs" : currentTab;
   setActiveTab(targetTab, true);
   updateUrlParams(query, targetTab);
   performSearch(query);
@@ -1021,6 +988,10 @@ window.addEventListener("popstate", () => {
   const albumId = getQueryParam("album");
   searchInput.value = query || "";
   updateClearButtonVisibility();
+  if (tab === "downloads") {
+    openSection("explore");
+    return;
+  }
 
   // Handle album view state
   if (albumId) {
@@ -1050,12 +1021,12 @@ window.addEventListener("popstate", () => {
   }
 
   // Restore tab state
-  if (tab === "songs" || tab === "albums" || tab === "library" || tab === "downloads") {
+  if (tab === "songs" || tab === "albums" || tab === "library") {
     setActiveTab(tab);
   }
 
   if (query) {
-    if (tab !== "library" && tab !== "downloads") {
+    if (tab !== "library") {
       performSearch(query);
     }
   } else {
@@ -1209,7 +1180,6 @@ async function handleDownloadAlbum(e) {
         btn.disabled = false;
         return;
       }
-      if (data.track_count > 0) downloadAttention = true;
       btn.textContent = `Queued (${data.track_count})`;
       await fetchQueue();
       setTimeout(() => {
@@ -1319,7 +1289,6 @@ async function handleDownload(e) {
         showExistingDownloadFeedback(btn);
         return;
       }
-      downloadAttention = true;
       btn.dataset.queueJobId = data.job_id;
       renderInlineDownload(btn, {
         id: data.job_id,

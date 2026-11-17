@@ -688,7 +688,6 @@ async function queueMultipleTracks(tracks, btn) {
       if (response.ok) {
         const data = await response.json();
         if (data.status === "existing") continue;
-        downloadAttention = true;
         queued++;
         await fetchQueue();
       }
