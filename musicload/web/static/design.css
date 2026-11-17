@@ -109,10 +109,9 @@ header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px;
 .search-form .format-dropdown .format-option:focus-visible { background: var(--bg-tertiary); }
 .search-form .format-dropdown .format-option[aria-selected="true"] { color: var(--accent-primary); }
 .format-dropdown .format-option[aria-selected="true"]::after { content: "✓"; }
-.format-selector-button[aria-expanded="true"] .format-selector-chevron { transform: rotate(180deg); }
 .search-form .format-selector-button {
   grid-column: 2; grid-row: 1; min-height: 44px; height: 44px;
-  min-width: 85px; padding: 0 12px; border: 0; border-left: 1px solid var(--border-color);
+  min-width: 60px; padding: 0 10px; justify-content: center; border: 0; border-left: 1px solid var(--border-color);
   border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 13px;
 }
 .search-form .format-selector-button:hover { background: var(--bg-tertiary); }
@@ -121,6 +120,8 @@ header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px;
   grid-column: 3; grid-row: 1; min-height: 44px; min-width: 88px; border-radius: 8px;
   padding: 0 18px; font-size: 13px; font-weight: 600;
 }
+.search-form button[type="submit"]::after { content: none !important; display: none !important; }
+.search-submit-icon { display: none; }
 .search-form:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-soft); }
 .search-form.local-search { grid-template-columns: minmax(0, 1fr) auto; }
 .search-form.local-search button[type="submit"] { grid-column: 2; }
@@ -220,9 +221,10 @@ body.login-page { padding: 24px; background: var(--bg-secondary); }
   .utility-controls .icon-btn svg { display: block; width: 20px; height: 20px; margin: 0; flex: none; }
   .search-form { margin-bottom: 28px; grid-template-columns: minmax(0, 1fr) auto auto; border-radius: 12px; }
   .search-form input { font-size: 16px; }
-  .search-form .format-selector-button { width: auto; min-width: 64px; padding: 0 8px; font-size: 11px; }
-  .search-form button[type="submit"] { width: 44px; min-width: 44px; min-height: 44px; padding: 0; font-size: 0; }
-  .search-form button[type="submit"]::after { content: "→"; transform: none; font-weight: 500; }
+  .search-form .format-selector-button { width: auto; min-width: 48px; padding: 0 6px; font-size: 11px; }
+  .search-form button[type="submit"] { position: relative; display: grid; place-items: center; width: 44px; min-width: 44px; height: 44px; min-height: 44px; padding: 0; line-height: 1; }
+  .search-submit-label { display: none; }
+  .search-submit-icon { position: absolute; inset: 0; display: block; width: 20px; height: 20px; margin: auto; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
   .explore-section-header, .queue-header, .library-header { flex-direction: row; align-items: center; flex-wrap: wrap; }
   .explore-section-header h2, .explore-section h2, .queue-header h2 { font-size: 20px; }
   .explore-section-actions { flex-wrap: wrap; gap: 8px; }
@@ -234,9 +236,9 @@ body.login-page { padding: 24px; background: var(--bg-secondary); }
   main :is(#songs-results, #explore-results, #listenbrainz-content, #library-tracks-list) .track-actions { display: flex; align-items: center; justify-content: center; width: auto; gap: 6px; margin: 0; }
   .track-actions .play-btn[data-playback-state] { display: inline-grid; width: 44px; min-width: 44px; }
   .download-btn { min-height: 44px; padding: 0 10px; font-size: 11px; }
-  .track-actions .download-btn:not(:disabled):not(.inline-download-progress) { display: inline-grid; place-items: center; width: 44px; min-width: 44px; height: 44px; padding: 0; font-size: 0; }
+  .track-actions .download-btn:not(:disabled):not(.inline-download-progress) { position: relative; display: inline-grid; place-items: center; width: 44px; min-width: 44px; height: 44px; padding: 0; font-size: 0; line-height: 0; }
   .track-actions .download-btn:not(:disabled):not(.inline-download-progress)::after {
-    content: ""; display: block; width: 20px; height: 20px; background: currentColor;
+    content: ""; position: absolute; inset: 0; margin: auto; display: block; width: 20px; height: 20px; background: currentColor;
     mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4'/%3E%3C/svg%3E") center / contain no-repeat;
   }
   .track-actions .library-delete-btn { display: inline-grid; place-items: center; width: 44px; height: 44px; min-width: 44px; padding: 0; }
@@ -258,8 +260,11 @@ body.login-page { padding: 24px; background: var(--bg-secondary); }
   .listenbrainz-settings-form :is(input, select, button) { width: 100%; min-width: 0; min-height: 44px; margin: 0; }
   .listenbrainz-settings-form .listenbrainz-auto-toggle { justify-content: center; min-height: 44px; }
   .listenbrainz-settings-form input[type="checkbox"] { width: 20px; min-height: 20px; }
-  #library-results .explore-playlist-header.library-header { grid-template-columns: minmax(0, 1fr) !important; }
-  #library-results .explore-playlist-header.library-header .explore-section-actions { flex-wrap: wrap; justify-content: flex-start !important; width: 100% !important; }
+  #library-results .explore-playlist-header.library-header { grid-template-columns: minmax(0, 1fr) auto !important; align-items: center !important; gap: 10px !important; }
+  #library-results .explore-playlist-header.library-header h2 { font-size: 18px; white-space: nowrap; }
+  #library-results .explore-playlist-header.library-header .explore-track-count { font-size: 12px; }
+  #library-results .explore-playlist-header.library-header .explore-section-actions { flex-wrap: nowrap; align-items: center !important; justify-content: center !important; width: auto !important; gap: 6px; }
+  #library-results .library-header .explore-section-actions button { min-height: 44px; padding: 8px; font-size: 12px; line-height: 1.2; white-space: nowrap; }
 }
 @media (prefers-reduced-transparency: reduce) {
   header, .mini-player, .mobile-nav { background: var(--bg-primary); backdrop-filter: none; }

@@ -1,4 +1,4 @@
-{% set asset_version = version ~ "-ui-20261117-4" %}
+{% set asset_version = version ~ "-ui-20261117-5" %}
 <!doctype html>
 <html lang="en">
   <head>
@@ -124,7 +124,6 @@
           <button id="format-selector-button" class="format-selector format-selector-button" type="button"
             aria-label="Choose audio format" aria-haspopup="listbox" aria-expanded="false" aria-controls="format-dropdown">
             <span id="format-selector-label">Opus</span>
-            <span class="format-selector-chevron" aria-hidden="true">⌄</span>
           </button>
           <div id="format-dropdown" class="format-dropdown" role="listbox" aria-label="Audio format" hidden>
             <button type="button" class="format-option" data-format="opus" role="option" aria-selected="true" tabindex="-1">Opus</button>
@@ -132,7 +131,10 @@
             <button type="button" class="format-option" data-format="flac" role="option" aria-selected="false" tabindex="-1">FLAC</button>
           </div>
         </div>
-        <button type="submit">Search</button>
+        <button type="submit" aria-label="Search">
+          <span class="search-submit-label">Search</span>
+          <svg class="search-submit-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6"/></svg>
+        </button>
       </form>
       <div id="app-status" class="status" role="status" aria-live="polite" hidden></div>
 
