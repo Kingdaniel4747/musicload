@@ -28,21 +28,16 @@ async function loadExploreContent() {
   exploreResults.innerHTML =
     '<div class="explore-loading">Loading explore content...</div>';
 
-  // Fetch moods, charts, and new releases independently so one failure does not block the others
+  // Show charts first; artist releases load separately so they cannot delay the page.
   let moods = null;
   let charts = null;
-  let newReleases = null;
 
-  const [moodsResult, chartsResult, newReleasesResult] = await Promise.allSettled([
+  const [moodsResult, chartsResult] = await Promise.allSettled([
     fetch("/api/explore/moods").then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }),
     fetch(`/api/explore/charts?country=${getPreferredChartCountry()}`).then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    }),
-    fetch("/api/explore/new-releases").then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }),
@@ -60,31 +55,15 @@ async function loadExploreContent() {
     console.error("Failed to load charts:", chartsResult.reason);
   }
 
-  if (newReleasesResult.status === "fulfilled") {
-    newReleases = newReleasesResult.value;
-  } else {
-    console.error("Failed to load new releases:", newReleasesResult.reason);
-  }
-
-  if (!moods && !charts && !newReleases) {
-    exploreResults.innerHTML =
-      '<div class="explore-error">Failed to load explore content. Please try again later.</div>';
-    exploreLoaded = false;
-    return;
-  }
-
-  renderExploreHome(moods, charts, false, newReleases);
+  renderExploreHome(moods, charts);
 }
 
-function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = null) {
+function renderExploreHome(moods, charts, skipUrlUpdate = false) {
   if (!skipUrlUpdate) chartPage = 0;
   exploreBreadcrumb = [];
-  // Cache moods and new releases so country selector changes skip re-fetching them
+  // Moods can be reused across regions; releases have their own regional cache.
   if (moods) {
     cachedMoods = moods;
-  }
-  if (newReleases) {
-    cachedNewReleases = newReleases;
   }
   // Store Global explicitly too, so reopening a link never changes its region.
   if (!skipUrlUpdate) {
@@ -164,46 +143,7 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
 
   html += "</div>";
 
-  // New Releases section
-  const releaseAlbums = (newReleases || cachedNewReleases || []);
-  if (releaseAlbums.length > 0) {
-    const nrStart = newReleasesPage * ALBUMS_PER_PAGE;
-    const pageAlbums = releaseAlbums.slice(nrStart, nrStart + ALBUMS_PER_PAGE);
-    html += `
-      <div class="explore-new-releases-section">
-        <div class="explore-section-header">
-          <h2>New Releases</h2>
-          <div class="explore-section-actions">
-          </div>
-        </div>
-        <div class="new-releases-grid">
-          ${pageAlbums.map((album) => `
-            <div class="new-release-card">
-              <img class="new-release-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
-              <div class="new-release-info">
-                <div class="new-release-title">${escapeHtml(album.title)}${album.is_explicit ? '<span class="explicit-badge">E</span>' : ""}</div>
-                <div class="new-release-artist">${escapeHtml(album.artist)}</div>
-                <div class="new-release-meta">
-                  ${album.album_type ? `<span>${escapeHtml(album.album_type)}</span>` : ""}
-                  ${album.year ? `<span>${album.year}</span>` : ""}
-                </div>
-              </div>
-              <div class="new-release-actions">
-                <button class="view-album-btn" data-browse-id="${album.browse_id}">View Tracks</button>
-                <button class="download-album-btn"
-                        data-browse-id="${album.browse_id}"
-                        data-title="${escapeHtml(album.title)}"
-                        data-artist="${escapeHtml(album.artist)}"
-                        data-year="${album.year || ""}">
-                  Download Album
-                </button>
-              </div>
-            </div>
-          `).join("")}
-        </div>
-        ${renderPaginationControls(newReleasesPage, releaseAlbums.length, "new-releases-page", ALBUMS_PER_PAGE)}
-      </div>`;
-  }
+  html += '<section id="new-releases-section" class="explore-new-releases-section"></section>';
 
   // Moods & Genres section
   if (moods && moods.length > 0) {
@@ -232,11 +172,14 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
   html += "</div>";
   exploreResults.innerHTML = html;
   attachExploreHandlers(charts);
+  loadNewReleasesForCountry(chartsCountry);
 }
 
 // Cache moods data so country selector changes do not re-fetch moods
 let cachedMoods = null;
-let cachedNewReleases = null;
+const regionalReleases = new Map();
+const releaseRequests = new Map();
+let lastReleaseCountry = null;
 
 // Pagination state
 const TRACKS_PER_PAGE = 10;
@@ -282,7 +225,7 @@ function attachExploreHandlers(charts) {
         if (!res.ok) throw new Error("Failed to load charts");
         const newCharts = await res.json();
         showStatus("");
-        renderExploreHome(cachedMoods, newCharts, false, cachedNewReleases);
+        renderExploreHome(cachedMoods, newCharts);
       } catch (error) {
         countrySelector.value = charts?.country || getPreferredChartCountry();
         showStatus("Failed to load charts: " + error.message, true);
@@ -307,25 +250,6 @@ function attachExploreHandlers(charts) {
     });
   }
 
-  // New releases pagination
-  attachPaginationHandlers("new-releases-page", (delta) => {
-    newReleasesPage += delta;
-    renderExploreHome(cachedMoods, charts, true, cachedNewReleases);
-  });
-
-  // New releases album buttons — show tracks inline in explore tab
-  exploreResults.querySelectorAll(".new-release-card .view-album-btn").forEach((btn) => {
-    btn.addEventListener("click", (e) => {
-      const browseId = e.target.dataset.browseId;
-      const card = e.target.closest(".new-release-card");
-      const title = card ? card.querySelector(".new-release-title")?.textContent?.trim() : "Album";
-      loadAlbumTracksInExplore(browseId, title);
-    });
-  });
-  exploreResults.querySelectorAll(".new-release-card .download-album-btn").forEach((btn) => {
-    btn.addEventListener("click", handleDownloadAlbum);
-  });
-
   // Mood category cards
   document.querySelectorAll(".mood-category-card").forEach((card) => {
     card.addEventListener("click", () => {
@@ -339,6 +263,84 @@ function attachExploreHandlers(charts) {
   exploreResults.querySelectorAll(".download-btn").forEach((btn) => {
     btn.addEventListener("click", handleDownload);
   });
+}
+
+function renderArtistReleases(albums, country, message = "", retry = false) {
+  const section = document.getElementById("new-releases-section");
+  if (!section || section.dataset.country !== country) return;
+  const releaseYear = albums[0]?.year || new Date().getFullYear();
+  newReleasesPage = Math.min(newReleasesPage, Math.max(0, Math.ceil(albums.length / ALBUMS_PER_PAGE) - 1));
+  const pageAlbums = albums.slice(newReleasesPage * ALBUMS_PER_PAGE, (newReleasesPage + 1) * ALBUMS_PER_PAGE);
+  section.innerHTML = `
+    <div class="explore-section-header">
+      <div><h2>Latest from chart artists</h2>
+        <p class="charts-source">${escapeHtml(chartCountryNames[country] || country)} · ${releaseYear} albums &amp; singles · YouTube Music</p>
+      </div>
+    </div>
+    ${message ? `<p class="release-status" role="status">${escapeHtml(message)}</p>` : ""}
+    ${retry ? '<button type="button" id="releases-retry" class="pagination-btn">Try again</button>' : ""}
+    <div class="new-releases-grid">
+      ${pageAlbums.map((album) => `
+        <div class="new-release-card">
+          <img class="new-release-cover" src="${proxyImageUrl(album.thumbnail_url)}" alt="${escapeHtml(album.title)}" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
+          <div class="new-release-info">
+            <div class="new-release-title">${escapeHtml(album.title)}${album.is_explicit ? '<span class="explicit-badge">E</span>' : ""}</div>
+            <div class="new-release-artist">${escapeHtml(album.artist)}</div>
+            <div class="new-release-meta">${escapeHtml(album.album_type || "Album")} · ${album.year || ""}</div>
+          </div>
+          <div class="new-release-actions">
+            <button class="view-album-btn" data-browse-id="${escapeHtml(album.browse_id)}">View Tracks</button>
+            <button class="download-album-btn" data-browse-id="${escapeHtml(album.browse_id)}" data-title="${escapeHtml(album.title)}" data-artist="${escapeHtml(album.artist)}" data-year="${album.year || ""}">Download Album</button>
+          </div>
+        </div>`).join("")}
+    </div>
+    ${renderPaginationControls(newReleasesPage, albums.length, "new-releases-page", ALBUMS_PER_PAGE)}
+  `;
+  section.querySelectorAll(".view-album-btn").forEach((button) => {
+    button.addEventListener("click", () => {
+      const title = button.closest(".new-release-card")?.querySelector(".new-release-title")?.textContent?.trim() || "Album";
+      loadAlbumTracksInExplore(button.dataset.browseId, title);
+    });
+  });
+  section.querySelectorAll(".download-album-btn").forEach((button) => button.addEventListener("click", handleDownloadAlbum));
+  attachPaginationHandlers("new-releases-page", (delta) => {
+    newReleasesPage += delta;
+    renderArtistReleases(albums, country);
+  });
+  document.getElementById("releases-retry")?.addEventListener("click", () => loadNewReleasesForCountry(country));
+}
+
+async function loadNewReleasesForCountry(country) {
+  const section = document.getElementById("new-releases-section");
+  if (!section) return;
+  section.dataset.country = country;
+  if (country !== lastReleaseCountry) newReleasesPage = 0;
+  lastReleaseCountry = country;
+  const cached = regionalReleases.get(country);
+  if (cached && Date.now() - cached.loadedAt < 30 * 60 * 1000) {
+    renderArtistReleases(cached.albums, country, cached.albums.length ? "" : "No current-year releases found for these chart artists.");
+    return;
+  }
+  renderArtistReleases([], country, "Loading the latest albums and singles from chart artists…");
+  if (!releaseRequests.has(country)) {
+    const request = fetch(`/api/explore/new-releases?country=${encodeURIComponent(country)}`)
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Could not load artist releases");
+        const albums = await response.json();
+        if (!Array.isArray(albums)) throw new Error("Invalid artist release response");
+        regionalReleases.set(country, { albums, loadedAt: Date.now() });
+        return albums;
+      }).finally(() => releaseRequests.delete(country));
+    releaseRequests.set(country, request);
+  }
+  try {
+    const albums = await releaseRequests.get(country);
+    // Keep the hidden Explore view current too when another tab is open.
+    // The section's country check prevents stale region responses overwriting it.
+    renderArtistReleases(albums, country, albums.length ? "" : "No current-year releases found for these chart artists.");
+  } catch {
+    renderArtistReleases([], country, "Latest releases are temporarily unavailable.", true);
+  }
 }
 
 async function loadMoodPlaylists(

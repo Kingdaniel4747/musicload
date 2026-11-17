@@ -6,9 +6,10 @@ import vm from 'node:vm';
 
 const template = readFileSync(new URL('../musicload/web/templates/index.html', import.meta.url), 'utf8');
 
-async function boot({ storageBlocked = false, missingDropdown = false, streamingBlocked = false, savedCountry = null } = {}) {
+async function boot({ storageBlocked = false, missingDropdown = false, streamingBlocked = false, savedCountry = null, releaseData = {}, deferReleases = false, releasesUnavailable = false } = {}) {
   const elements = new Map();
   const calls = [];
+  const releaseResolvers = new Map();
   const stored = new Map();
   if (savedCountry) stored.set('chartCountry', savedCountry);
   let document;
@@ -94,6 +95,12 @@ async function boot({ storageBlocked = false, missingDropdown = false, streaming
     setTimeout: () => 1, clearTimeout() {},
     fetch: async (url) => {
       calls.push(url);
+      if (url.includes('/new-releases')) {
+        if (releasesUnavailable) return { ok: false };
+        const country = new URL(url, 'http://localhost').searchParams.get('country');
+        if (deferReleases) return new Promise((resolve) => releaseResolvers.set(country, (albums) => resolve({ ok: true, json: async () => albums })));
+        return { ok: true, json: async () => releaseData[country] || [] };
+      }
       let data = [];
       if (url.includes('/queue/')) data = { jobs: [] };
       if (url.includes('/charts')) data = {
@@ -109,7 +116,7 @@ async function boot({ storageBlocked = false, missingDropdown = false, streaming
     vm.runInContext(readFileSync(new URL(`../musicload/web/static/${match[1]}`, import.meta.url), 'utf8'), context, { filename: match[1] });
   }
   await new Promise((resolve) => setImmediate(resolve));
-  return { get, calls, options, context, stored, document, window };
+  return { get, calls, options, context, stored, document, window, releaseResolvers };
 }
 
 test('full page starts, loads songs and the format dropdown responds', async () => {
@@ -165,4 +172,49 @@ test('switching to Global stores ZZ explicitly in both the preference and URL', 
   assert.equal(stored.get('chartCountry'), 'ZZ');
   assert.equal(window.location.searchParams.get('country'), 'ZZ');
   assert.match(get('explore-results').innerHTML, /Top Charts \(Global\)/);
+});
+
+test('charts and controls respond before slower artist releases finish', async () => {
+  const { get, releaseResolvers } = await boot({ deferReleases: true });
+  assert.match(get('explore-results').innerHTML, /Test song/);
+  assert.match(get('new-releases-section').innerHTML, /Loading the latest/);
+  await get('format-selector-button').click();
+  assert.equal(get('format-dropdown').hidden, false);
+  releaseResolvers.get('DE')([{ browse_id: 'MPREnew', title: 'New artist album', artist: 'Chart artist', year: 2026 }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(get('new-releases-section').innerHTML, /New artist album/);
+  assert.match(get('new-releases-section').innerHTML, /Latest from chart artists/);
+});
+
+test('late releases from another region cannot overwrite the selected country', async () => {
+  const { get, calls, releaseResolvers } = await boot({ deferReleases: true });
+  await get('charts-country-selector').dispatch('change', { target: { value: 'US' } });
+  releaseResolvers.get('US')([{ browse_id: 'MPREus', title: 'US album', artist: 'US artist', year: 2026 }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseResolvers.get('DE')([{ browse_id: 'MPREde', title: 'DE album', artist: 'DE artist', year: 2026 }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.match(get('new-releases-section').innerHTML, /US album/);
+  assert.doesNotMatch(get('new-releases-section').innerHTML, /DE album/);
+  await get('charts-country-selector').dispatch('change', { target: { value: 'DE' } });
+  assert.match(get('new-releases-section').innerHTML, /DE album/);
+  assert.equal(calls.filter((url) => url === '/api/explore/new-releases?country=DE').length, 1);
+});
+
+test('unavailable artist releases show a retry without removing working charts', async () => {
+  const { get } = await boot({ releasesUnavailable: true });
+  assert.match(get('explore-results').innerHTML, /Test song/);
+  assert.match(get('new-releases-section').innerHTML, /temporarily unavailable/);
+  assert.match(get('new-releases-section').innerHTML, /Try again/);
+  await get('format-selector-button').click();
+  assert.equal(get('format-dropdown').hidden, false);
+});
+
+test('releases finishing in another tab are ready when returning to Explore', async () => {
+  const { get, context, releaseResolvers } = await boot({ deferReleases: true });
+  vm.runInContext('setActiveTab("songs", true)', context);
+  releaseResolvers.get('DE')([{ browse_id: 'MPREnew', title: 'Finished album', artist: 'Artist', year: 2026 }]);
+  await new Promise((resolve) => setImmediate(resolve));
+  await get('explore-btn').click();
+  assert.match(get('new-releases-section').innerHTML, /Finished album/);
+  assert.doesNotMatch(get('new-releases-section').innerHTML, /Loading the latest/);
 });

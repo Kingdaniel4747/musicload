@@ -859,7 +859,7 @@ async function loadExploreContentWithCountry(
   exploreResults.innerHTML =
     '<div class="explore-loading">Loading explore content...</div>';
 
-  const [moodsResult, chartsResult, newReleasesResult] = await Promise.allSettled([
+  const [moodsResult, chartsResult] = await Promise.allSettled([
     fetch("/api/explore/moods").then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
@@ -870,27 +870,13 @@ async function loadExploreContentWithCountry(
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }),
-    fetch("/api/explore/new-releases").then((res) => {
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return res.json();
-    }),
   ]);
 
   let moods =
     moodsResult.status === "fulfilled" ? moodsResult.value : null;
   let charts =
     chartsResult.status === "fulfilled" ? chartsResult.value : null;
-  let newReleases =
-    newReleasesResult.status === "fulfilled" ? newReleasesResult.value : null;
-
-  if (!moods && !charts && !newReleases) {
-    exploreResults.innerHTML =
-      '<div class="explore-error">Failed to load explore content. Please try again later.</div>';
-    exploreLoaded = false;
-    return;
-  }
-
-  renderExploreHome(moods, charts, skipUrlUpdate, newReleases);
+  renderExploreHome(moods, charts || { country, tracks: [] }, skipUrlUpdate);
 }
 
 // Extract search logic into reusable function

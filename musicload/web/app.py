@@ -72,7 +72,7 @@ _moods_cache = TtlCache(max_entries=1, ttl_seconds=3600)          # 1 hour
 _mood_playlists_cache = TtlCache(max_entries=25, ttl_seconds=1800)  # 30 min
 _charts_cache = TtlCache(max_entries=10, ttl_seconds=1800)        # 30 min
 _playlist_tracks_cache = TtlCache(max_entries=25, ttl_seconds=900)  # 15 min
-_new_releases_cache = TtlCache(max_entries=1, ttl_seconds=1800)    # 30 min
+_new_releases_cache = TtlCache(max_entries=12, ttl_seconds=1800)   # 30 min, per region
 
 # Setup templates and static files
 templates_dir = Path(__file__).parent / "templates"
@@ -1745,27 +1745,29 @@ async def api_explore_charts(country: str = Query("ZZ", description="ISO 3166-1 
 
 
 @app.get("/api/explore/new-releases")
-async def api_explore_new_releases():
-    """Get new album releases from YouTube Music."""
+async def api_explore_new_releases(country: str = Query("DE", pattern=r"^[A-Z]{2}$")):
+    """Get current-year releases from chart artists in the requested region."""
     from musicload.search import get_new_releases
     import logging
     logger = logging.getLogger(__name__)
 
-    cached = _new_releases_cache.get("new_releases")
+    from datetime import UTC, datetime
+    cache_key = f"chart_artist_releases:{country}:{datetime.now(UTC).year}"
+    cached = _new_releases_cache.get(cache_key)
     if cached is not None:
         return cached
 
     try:
-        albums = get_new_releases()
+        albums = await asyncio.to_thread(get_new_releases, country)
         result = [
             AlbumResponse(**album.model_dump())
             for album in albums
         ]
-        _new_releases_cache.put("new_releases", result)
+        _new_releases_cache.put(cache_key, result)
         return result
     except Exception as e:
-        logger.error("Failed to get new releases: %s", e)
-        raise HTTPException(status_code=500, detail=f"Failed to get new releases: {str(e)}")
+        logger.error("Failed to get artist releases (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Latest artist releases are temporarily unavailable.")
 
 
 @app.get("/api/explore/playlist/{playlist_id}/tracks")

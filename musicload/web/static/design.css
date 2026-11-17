@@ -142,6 +142,7 @@ header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px;
 .charts-source { margin-top: 5px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
 .charts-source a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .chart-rank { color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.release-status { margin-bottom: 16px; color: var(--text-secondary); font-size: 14px; }
 .chart-tracks-list, .results { gap: 0; }
 .track {
   min-height: 84px; padding: 12px 8px; gap: 16px;

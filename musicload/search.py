@@ -1,6 +1,9 @@
 """YouTube Music search and explore functionality using ytmusicapi."""
 
 import logging
+from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
+from itertools import zip_longest
 from pathlib import Path
 from urllib.parse import quote
 
@@ -243,51 +246,84 @@ def get_album_tracks(browse_id: str) -> list[Track]:
     return tracks
 
 
-def get_new_releases() -> list[Album]:
-    """Fetch new album releases from YouTube Music explore page.
+def get_new_releases(country: str = "DE") -> list[Album]:
+    """Current-year releases from artists listed in the selected region's charts.
 
-    Uses ytmusicapi's get_explore() to retrieve the new_releases section,
-    which contains recently released albums.
-
-    Returns:
-        List of Album objects representing new releases.
-
-    Raises:
-        Exception: If YouTube Music API fails (e.g., JSONDecodeError, network error)
+    Anonymous Explore recommendations are deliberately excluded. YouTube only
+    exposes a release year here, so this is not presented as a last-week feed.
     """
-    yt = YTMusic()
-    try:
-        raw = yt.get_explore()
-    except Exception as e:
-        logger.error("YouTube Music get_explore failed: %s", e)
-        raise
+    location = "" if country == "ZZ" else country
+    year = datetime.now(UTC).year
+    raw = YTMusic(language="en", location=location).get_charts(country)
+    artists = []
+    seen_artists = set()
+    for artist in raw.get("artists", []):
+        browse_id = artist.get("browseId")
+        if not browse_id or browse_id in seen_artists:
+            continue
+        seen_artists.add(browse_id)
+        artists.append(artist)
+        if len(artists) == 12:
+            break
 
+    def artist_releases(artist: dict) -> list[Album]:
+        client = YTMusic(language="en", location=location)
+        try:
+            profile = client.get_artist(artist["browseId"])
+        except Exception as error:
+            logger.warning("Could not load release artist %s (%s)", artist["browseId"], type(error).__name__)
+            return []
+        name = profile.get("name") or artist.get("title")
+        if not name:
+            return []
+        releases = []
+        for section_name, fallback_type, maximum in (("singles", "Single", 2), ("albums", "Album", 1)):
+            section = profile.get(section_name) or {}
+            items = section.get("results") or []
+            if section.get("browseId") and section.get("params"):
+                try:
+                    items = client.get_artist_albums(
+                        section["browseId"], section["params"], limit=5, order="Recency",
+                    )
+                except Exception as error:
+                    logger.warning("Could not sort %s releases for %s (%s)", section_name, name, type(error).__name__)
+            count = 0
+            for item in items:
+                if str(item.get("year")) != str(year) or not item.get("browseId") or not item.get("title"):
+                    continue
+                thumbnails = item.get("thumbnails") or []
+                releases.append(Album(
+                    browse_id=item["browseId"], title=item["title"], artist=name,
+                    year=year, track_count=None,
+                    thumbnail_url=thumbnails[-1].get("url") if thumbnails else None,
+                    audio_playlist_id=item.get("audioPlaylistId") or item.get("playlistId"),
+                    album_type=item.get("type") or fallback_type,
+                    is_explicit=bool(item.get("isExplicit")),
+                ))
+                count += 1
+                if count == maximum:
+                    break
+        return releases
+
+    # Separate clients avoid sharing a requests session across worker threads.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        per_artist = list(pool.map(artist_releases, artists))
     albums = []
-    for item in raw.get("new_releases", []):
-        artists = item.get("artists", [])
-        artist_name = artists[0]["name"] if artists else "Unknown Artist"
-
-        thumbnails = item.get("thumbnails", [])
-        thumbnail_url = thumbnails[-1]["url"] if thumbnails else None
-
-        year_raw = item.get("year")
-        year = int(year_raw) if year_raw and str(year_raw).isdigit() else None
-
-        albums.append(
-            Album(
-                browse_id=item.get("browseId", ""),
-                title=item.get("title", "Unknown"),
-                artist=artist_name,
-                year=year,
-                track_count=None,
-                thumbnail_url=thumbnail_url,
-                audio_playlist_id=item.get("audioPlaylistId"),
-                album_type=item.get("type"),
-                is_explicit=item.get("isExplicit", False),
-            )
-        )
-
-    logger.info("Found %d new release albums", len(albums))
+    seen_ids = set()
+    seen_names = set()
+    for row in zip_longest(*per_artist):
+        for album in row:
+            if album is None:
+                continue
+            key = (album.artist.casefold(), album.title.casefold())
+            if album.browse_id in seen_ids or key in seen_names:
+                continue
+            seen_ids.add(album.browse_id)
+            seen_names.add(key)
+            albums.append(album)
+            if len(albums) == 24:
+                return albums
+    logger.info("Found %d current-year releases from chart artists for %s", len(albums), country)
     return albums
 
 
