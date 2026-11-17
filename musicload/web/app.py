@@ -408,6 +408,8 @@ class ChartsResponse(BaseModel):
     country: str
     tracks: list[ChartTrackResponse]
     artists: list[ChartArtistResponse]
+    source_title: str | None = None
+    source_url: str | None = None
 
 
 class LibraryTrackResponse(BaseModel):
@@ -1696,16 +1698,18 @@ async def api_explore_charts(country: str = Query("ZZ", description="ISO 3166-1 
             detail=f"Invalid country code '{country}': must be a 2-letter uppercase ISO 3166-1 Alpha-2 code (e.g., 'US', 'GB', 'ZZ')"
         )
 
-    cache_key = f"charts:{country}"
+    cache_key = f"charts:{country}:{get_config().allow_ugc}"
     cached = _charts_cache.get(cache_key)
     if cached is not None:
         return cached
 
     try:
         config = get_config()
-        charts = get_charts(country, allow_ugc=config.allow_ugc)
+        charts = await asyncio.to_thread(get_charts, country, allow_ugc=config.allow_ugc)
         response = ChartsResponse(
             country=charts.country,
+            source_title=charts.source_title,
+            source_url=charts.source_url,
             tracks=[
                 ChartTrackResponse(
                     video_id=t.video_id,

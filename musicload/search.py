@@ -2,10 +2,12 @@
 
 import logging
 from pathlib import Path
+from urllib.parse import quote
 
 from ytmusicapi import YTMusic
 
 from musicload.config import get_config
+from musicload.chart_sources import chart_playlists, chart_priority
 from musicload.metadata_cache import CachedSongMetadata, CachedTrack, MetadataCache
 from musicload.models.search import (
     Album,
@@ -524,7 +526,8 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
       - genres: (country-specific) list of genre playlist references
       - countries: {selected, options}
 
-    We fetch tracks from the first video playlist to populate chart tracks.
+    Select explicitly named weekly/daily charts and retain their published order.
+    Never substitute an arbitrary working playlist when charts are unavailable.
 
     Args:
         country: ISO 3166-1 Alpha-2 country code. Default 'ZZ' for global charts.
@@ -536,21 +539,19 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
         Exception: If YouTube Music API fails to fetch chart metadata. Individual
                    playlist fetch errors are logged and retried with next playlist.
     """
-    yt = YTMusic()
+    yt = YTMusic(language="en")
     try:
         raw = yt.get_charts(country)
     except Exception as e:
         logger.error("YouTube Music get_charts failed for country '%s': %s", country, e)
         raise
 
-    # Videos section is a list of playlist references -- try each until one succeeds.
-    # Some entries use album-style IDs (OLAK5uy_...) that fail with get_playlist,
-    # so we iterate through all playlist references and use the first that works.
-    # Error Handling: Individual playlist fetch errors are logged and the loop continues
-    # to try the next playlist (retry pattern). This ensures we get chart data even if
-    # some playlist references are broken.
+    # Only use named charts supplied by the charts endpoint, preferring weekly
+    # charts. Albums, radio mixes, genre lists and unrelated playlists are skipped.
     tracks = []
-    video_playlists = raw.get("videos", [])
+    source_title = None
+    source_url = None
+    video_playlists = chart_playlists(raw)
     if isinstance(video_playlists, list):
         for playlist_ref in video_playlists:
             playlist_id = playlist_ref.get("playlistId", "")
@@ -558,6 +559,15 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
                 continue
             try:
                 playlist_data = yt.get_playlist(playlist_id, limit=100)
+                author = playlist_data.get("author") or {}
+                if not isinstance(author, dict) or author.get("id") != "FEmusic_charts":
+                    logger.warning("Ignoring playlist not published by YouTube Charts: %s", playlist_id)
+                    continue
+                title = playlist_data.get("title") or playlist_ref["title"]
+                if chart_priority(title) is None:
+                    logger.warning("Ignoring non-chart playlist returned for %s", playlist_id)
+                    continue
+                playlist_tracks = []
                 for rank_idx, item in enumerate(playlist_data.get("tracks", []), 1):
                     video_id = item.get("videoId", "")
                     if not video_id:
@@ -587,7 +597,7 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
                     # Extract view count (ytmusicapi playlist tracks may have views)
                     view_count = item.get("views")
 
-                    tracks.append(
+                    playlist_tracks.append(
                         ChartTrack(
                             video_id=video_id,
                             title=item.get("title", "Unknown"),
@@ -602,7 +612,11 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
                             video_type=video_type,
                         )
                     )
-                break  # Successfully fetched tracks, stop trying other playlists
+                if playlist_tracks:
+                    tracks = playlist_tracks
+                    source_title = title
+                    source_url = f"https://music.youtube.com/playlist?list={quote(playlist_id, safe='')}"
+                    break
             except Exception as e:
                 logger.warning("Failed to fetch chart playlist '%s': %s, trying next", playlist_id, e)
 
@@ -623,7 +637,10 @@ def get_charts(country: str = "ZZ", allow_ugc: bool = False) -> Charts:
             )
 
     logger.info("Found %d chart tracks and %d chart artists for %s", len(tracks), len(artists), country)
-    return Charts(country=country, tracks=tracks, artists=artists)
+    return Charts(
+        country=country, tracks=tracks, artists=artists,
+        source_title=source_title, source_url=source_url,
+    )
 
 
 def get_playlist_tracks(playlist_id: str, allow_ugc: bool = False) -> list[Track]:

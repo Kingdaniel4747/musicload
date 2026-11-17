@@ -364,7 +364,7 @@ function updateExploreUrlParams(view, options = {}) {
   if (view && view !== "home") {
     url.searchParams.set("view", view);
   }
-  if (view === "charts" && options.country && options.country !== "ZZ") {
+  if (view === "charts" && options.country) {
     url.searchParams.set("country", options.country);
   }
   if (view === "mood") {
@@ -821,7 +821,7 @@ function restoreExploreFromUrl() {
   if (view === "charts") {
     // Restore charts view with specific country (skipUrlUpdate since we're restoring from URL)
     setActiveTab("explore", true);
-    loadExploreContentWithCountry(country || "ZZ", true);
+    loadExploreContentWithCountry(country || getPreferredChartCountry(), true);
     return true;
   } else if (view === "mood" && moodParams) {
     // Restore mood playlists view (skipUrlUpdate since we're restoring from URL)

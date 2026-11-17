@@ -1,6 +1,24 @@
 // --- Explore functionality ---
 let exploreLoaded = false;
 let exploreBreadcrumb = []; // tracks navigation: [{type, title, params?}]
+const chartCountryNames = {
+  DE: "Germany", ZZ: "Global", US: "United States", GB: "United Kingdom",
+  FR: "France", JP: "Japan", KR: "South Korea", BR: "Brazil", IN: "India",
+  AU: "Australia", CA: "Canada",
+};
+
+function getPreferredChartCountry() {
+  try {
+    const saved = localStorage.getItem("chartCountry");
+    if (Object.hasOwn(chartCountryNames, saved)) return saved;
+  } catch { /* Storage may be disabled on mobile. */ }
+  return "DE";
+}
+
+function rememberChartCountry(country) {
+  if (!Object.hasOwn(chartCountryNames, country)) return;
+  try { localStorage.setItem("chartCountry", country); } catch { /* Keep working without storage. */ }
+}
 
 async function loadExploreContent() {
   if (exploreLoaded && exploreBreadcrumb.length === 0) return;
@@ -20,7 +38,7 @@ async function loadExploreContent() {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }),
-    fetch("/api/explore/charts?country=ZZ").then((res) => {
+    fetch(`/api/explore/charts?country=${getPreferredChartCountry()}`).then((res) => {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     }),
@@ -68,28 +86,28 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
   if (newReleases) {
     cachedNewReleases = newReleases;
   }
-  // Update URL to reflect charts country if not ZZ
+  // Store Global explicitly too, so reopening a link never changes its region.
   if (!skipUrlUpdate) {
     const chartsCountryCode =
-      charts && charts.country ? charts.country : "ZZ";
-    if (chartsCountryCode !== "ZZ") {
-      updateExploreUrlParams("charts", { country: chartsCountryCode });
-    } else {
-      updateExploreUrlParams("home");
-    }
+      charts && charts.country ? charts.country : getPreferredChartCountry();
+    updateExploreUrlParams("charts", { country: chartsCountryCode });
   }
   let html = '<div class="explore-home">';
 
   // Charts section -- always render the header with country selector
-  const chartsCountry = charts && charts.country ? charts.country : "ZZ";
+  const chartsCountry = charts && charts.country ? charts.country : getPreferredChartCountry();
+  if (charts) rememberChartCountry(chartsCountry);
   const chartTracks = charts && charts.tracks ? charts.tracks : [];
 
   html += `
           <div class="explore-charts-section">
               <div class="explore-section-header">
-                  <h2>Top Charts (${escapeHtml(chartsCountry === "ZZ" ? "Global" : chartsCountry)})</h2>
+                  <div>
+                    <h2>Top Charts (${escapeHtml(chartCountryNames[chartsCountry] || chartsCountry)})</h2>
+                    ${charts?.source_title && charts?.source_url ? `<p class="charts-source"><a href="${escapeHtml(charts.source_url)}" target="_blank" rel="noopener noreferrer">YouTube · ${escapeHtml(charts.source_title)}</a></p>` : ""}
+                  </div>
                   <div class="explore-section-actions">
-                      <select id="charts-country-selector" class="country-selector">
+                      <select id="charts-country-selector" class="country-selector" aria-label="Chart country">
                           <option value="ZZ" ${chartsCountry === "ZZ" ? "selected" : ""}>Global</option>
                           <option value="US" ${chartsCountry === "US" ? "selected" : ""}>United States</option>
                           <option value="GB" ${chartsCountry === "GB" ? "selected" : ""}>United Kingdom</option>
@@ -119,7 +137,7 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
                           <div class="track-main">
                               <img class="track-cover" src="${proxyImageUrl(track.thumbnail_url)}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/static/musicload-mark.svg'">
                               <div class="track-info">
-                                  <div class="track-title">${escapeHtml(track.title)}${isUgcVideoType(track.video_type) ? '<span class="ugc-badge">UGC</span>' : ""}</div>
+                                  <div class="track-title">${track.rank ? `<span class="chart-rank">${escapeHtml(track.rank)}.</span> ` : ""}${escapeHtml(track.title)}${isUgcVideoType(track.video_type) ? '<span class="ugc-badge">UGC</span>' : ""}</div>
                                   <div class="track-artist">${escapeHtml(track.artist)}</div>
                                   <div class="track-meta">
                                       ${track.duration ? `<span class="track-duration">${track.duration}</span>` : ""}
@@ -141,7 +159,7 @@ function renderExploreHome(moods, charts, skipUrlUpdate = false, newReleases = n
           `;
   } else {
     html +=
-      '<div class="explore-charts-empty">No chart tracks available. Try selecting a different country.</div>';
+      '<div class="explore-charts-empty">No official chart playlist is available for this region right now. Try a different country.</div>';
   }
 
   html += "</div>";
@@ -266,6 +284,7 @@ function attachExploreHandlers(charts) {
         showStatus("");
         renderExploreHome(cachedMoods, newCharts, false, cachedNewReleases);
       } catch (error) {
+        countrySelector.value = charts?.country || getPreferredChartCountry();
         showStatus("Failed to load charts: " + error.message, true);
       }
     });

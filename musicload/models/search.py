@@ -118,6 +118,8 @@ class Charts(BaseModel):
     country: str
     tracks: list[ChartTrack] = []
     artists: list[ChartArtist] = []
+    source_title: str | None = None
+    source_url: str | None = None
 
 
 class SongMetadata(BaseModel):

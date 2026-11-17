@@ -6,10 +6,11 @@ import vm from 'node:vm';
 
 const template = readFileSync(new URL('../musicload/web/templates/index.html', import.meta.url), 'utf8');
 
-async function boot({ storageBlocked = false, missingDropdown = false, streamingBlocked = false } = {}) {
+async function boot({ storageBlocked = false, missingDropdown = false, streamingBlocked = false, savedCountry = null } = {}) {
   const elements = new Map();
   const calls = [];
   const stored = new Map();
+  if (savedCountry) stored.set('chartCountry', savedCountry);
   let document;
   class Element {
     constructor(id = '') {
@@ -71,7 +72,10 @@ async function boot({ storageBlocked = false, missingDropdown = false, streaming
     },
   });
   const window = Object.assign(new Element(), {
-    location: new URL('http://localhost/'), history: { pushState() {}, replaceState() {} },
+    location: new URL('http://localhost/'), history: {
+      pushState(_state, _title, url) { window.location = new URL(url); },
+      replaceState(_state, _title, url) { window.location = new URL(url); },
+    },
     setInterval() {}, setTimeout() {}, clearTimeout() {},
   });
   class Observer { observe() {} unobserve() {} disconnect() {} }
@@ -92,7 +96,11 @@ async function boot({ storageBlocked = false, missingDropdown = false, streaming
       calls.push(url);
       let data = [];
       if (url.includes('/queue/')) data = { jobs: [] };
-      if (url.includes('/charts')) data = { country: 'ZZ', tracks: [{ video_id: 'abcdefghijk', title: 'Test song', artist: 'Test artist' }] };
+      if (url.includes('/charts')) data = {
+        country: new URL(url, 'http://localhost').searchParams.get('country'),
+        source_title: 'Weekly Top Music Videos', source_url: 'https://music.youtube.com/playlist?list=PLcharts',
+        tracks: [{ video_id: 'abcdefghijk', title: 'Test song', artist: 'Test artist', rank: '1' }],
+      };
       if (url.includes('/search')) data = { results: [] };
       return { ok: true, json: async () => data };
     },
@@ -101,12 +109,12 @@ async function boot({ storageBlocked = false, missingDropdown = false, streaming
     vm.runInContext(readFileSync(new URL(`../musicload/web/static/${match[1]}`, import.meta.url), 'utf8'), context, { filename: match[1] });
   }
   await new Promise((resolve) => setImmediate(resolve));
-  return { get, calls, options, context, stored, document };
+  return { get, calls, options, context, stored, document, window };
 }
 
 test('full page starts, loads songs and the format dropdown responds', async () => {
   const { get, calls, options, stored } = await boot();
-  assert.ok(calls.includes('/api/explore/charts?country=ZZ'));
+  assert.ok(calls.includes('/api/explore/charts?country=DE'));
   assert.match(get('explore-results').innerHTML, /Test song/);
   await get('format-selector-button').click();
   assert.equal(get('format-dropdown').hidden, false);
@@ -118,7 +126,7 @@ test('full page starts, loads songs and the format dropdown responds', async () 
 
 test('blocked browser storage does not prevent startup or changing the format', async () => {
   const { get, options, calls } = await boot({ storageBlocked: true });
-  assert.ok(calls.includes('/api/explore/charts?country=ZZ'));
+  assert.ok(calls.includes('/api/explore/charts?country=DE'));
   await get('format-selector-button').click();
   await options[2].click();
   assert.equal(get('format-selector').value, 'flac');
@@ -127,7 +135,7 @@ test('blocked browser storage does not prevent startup or changing the format', 
 
 test('a cached page without the new dropdown still loads songs', async () => {
   const { get, calls } = await boot({ missingDropdown: true });
-  assert.ok(calls.includes('/api/explore/charts?country=ZZ'));
+  assert.ok(calls.includes('/api/explore/charts?country=DE'));
   assert.match(get('explore-results').innerHTML, /Test song/);
   await get('explore-btn').click();
   assert.equal(get('explore-btn')['aria-current'], 'page');
@@ -136,7 +144,25 @@ test('a cached page without the new dropdown still loads songs', async () => {
 test('blocked event streaming falls back to polling without preventing startup', async () => {
   const { get, calls } = await boot({ streamingBlocked: true });
   assert.ok(calls.includes('/api/queue/jobs'));
-  assert.ok(calls.includes('/api/explore/charts?country=ZZ'));
+  assert.ok(calls.includes('/api/explore/charts?country=DE'));
   await get('format-selector-button').click();
   assert.equal(get('format-dropdown').hidden, false);
+});
+
+test('charts use the saved region and show their source and published rank', async () => {
+  const { get, calls } = await boot({ savedCountry: 'US' });
+  assert.ok(calls.includes('/api/explore/charts?country=US'));
+  const html = get('explore-results').innerHTML;
+  assert.match(html, /Top Charts \(United States\)/);
+  assert.match(html, /https:\/\/music.youtube.com\/playlist\?list=PLcharts/);
+  assert.match(html, /chart-rank">1\./);
+});
+
+test('switching to Global stores ZZ explicitly in both the preference and URL', async () => {
+  const { get, stored, window, calls } = await boot();
+  await get('charts-country-selector').dispatch('change', { target: { value: 'ZZ' } });
+  assert.ok(calls.includes('/api/explore/charts?country=ZZ'));
+  assert.equal(stored.get('chartCountry'), 'ZZ');
+  assert.equal(window.location.searchParams.get('country'), 'ZZ');
+  assert.match(get('explore-results').innerHTML, /Top Charts \(Global\)/);
 });
