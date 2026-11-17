@@ -84,6 +84,13 @@ function updateSearchContext() {
     logs: "Application logs",
   };
   searchInput.placeholder = placeholders[currentTab] || placeholders.explore;
+  const searchLabel = currentTab === "library" ? "Search local files" : currentTab === "downloads" ? "Filter downloads" : "Search music";
+  searchInput.setAttribute("aria-label", searchLabel);
+  searchForm.setAttribute("aria-label", searchLabel);
+  searchInput.setAttribute("aria-label", searchInput.placeholder);
+  const isLocalSearch = ["library", "downloads"].includes(currentTab);
+  formatSelectorButton.hidden = isLocalSearch;
+  searchForm.classList.toggle("local-search", isLocalSearch);
 }
 
 tabButtons.forEach((btn) => {
@@ -97,22 +104,23 @@ tabButtons.forEach((btn) => {
   });
 });
 
-document.getElementById("library-btn").addEventListener("click", () => {
+function openSection(tab) {
   exitAlbumViewMode();
-  setActiveTab("library");
-  updateUrlParams("", "library");
-});
+  searchInput.value = "";
+  updateClearButtonVisibility();
+  setActiveTab(tab);
+  if (tab === "explore") updateExploreUrlParams("home");
+  else updateUrlParams("", tab);
+}
+
+document.getElementById("library-btn").addEventListener("click", () => openSection("library"));
 
 document.getElementById("explore-btn").addEventListener("click", () => {
-  exitAlbumViewMode();
-  setActiveTab("explore");
-  updateExploreUrlParams("home");
+  openSection("explore");
 });
 
 document.getElementById("downloads-btn").addEventListener("click", () => {
-  exitAlbumViewMode();
-  setActiveTab("downloads");
-  updateUrlParams("", "downloads");
+  openSection("downloads");
 });
 
 const listenbrainzButton = document.getElementById("listenbrainz-btn");
@@ -205,7 +213,10 @@ function handleBackToAlbums() {
 }
 
 function showStatus(message, isError = false) {
-  if (isError && message) console.error(message);
+  const status = document.getElementById("app-status");
+  status.hidden = !message;
+  status.textContent = message || "";
+  status.classList.toggle("error", isError);
 }
 
 function closePlaylistSearch() {
@@ -438,11 +449,33 @@ async function loadLogs(silent = false) {
 function setActiveTab(tab, skipExploreLoad = false) {
   if (tab !== "listenbrainz") closeListenBrainzStream();
   currentTab = tab;
+  showStatus("");
   if (tab === "downloads") downloadAttention = false;
   updateSearchContext();
   const activeMobileTab = ["songs", "albums"].includes(tab) ? "explore" : tab;
+  const pageContent = {
+    explore: ["Explore", "Find your next favorite. Preview it, then add it to your library."],
+    songs: ["Search", "Listen first. Download the songs you want to keep."],
+    albums: ["Search", "Find a complete album and add it to your library."],
+    library: ["Library", "Your music, ready to play. Browse and manage your local files."],
+    downloads: ["Downloads", "Follow your downloads. Completed music is saved to your library."],
+    listenbrainz: ["For you", "Discover your ListenBrainz recommendations and plan your next downloads."],
+    logs: ["Activity logs", "Check recent application activity and connection details."],
+  };
+  const [title, description] = pageContent[tab] || pageContent.explore;
+  document.getElementById("page-title").textContent = title;
+  document.getElementById("page-description").textContent = description;
+  document.title = `${title} · Musicload`;
+  document.querySelectorAll(".header-controls > .icon-btn, #logs-btn").forEach((button) => {
+    const active = button.id === `${activeMobileTab}-btn`;
+    button.classList.toggle("active", active);
+    if (active) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
+  });
   document.querySelectorAll(".mobile-nav-btn").forEach((button) => {
     button.classList.toggle("active", button.dataset.mobileTab === activeMobileTab);
+    if (button.dataset.mobileTab === activeMobileTab) button.setAttribute("aria-current", "page");
+    else button.removeAttribute("aria-current");
   });
   tabButtons.forEach((b) => {
     if (b.dataset.tab === tab) {
@@ -466,7 +499,7 @@ function setActiveTab(tab, skipExploreLoad = false) {
   document.querySelector("#search-form button[type='submit']").disabled = false;
   document.getElementById("search-form").classList.remove("search-disabled");
   document.getElementById("search-form").style.display =
-    ["explore", "library", "songs", "albums"].includes(tab) ? "" : "none";
+    ["explore", "library", "songs", "albums", "downloads"].includes(tab) ? "" : "none";
 
   if (tab === "songs") {
     songsResults.classList.add("active");
@@ -772,11 +805,15 @@ async function initAutoSearch() {
   }
 
   if (tab === "library") {
+    searchInput.value = query || "";
+    updateClearButtonVisibility();
     setActiveTab("library");
     return;
   }
 
   if (tab === "downloads") {
+    searchInput.value = query || "";
+    updateClearButtonVisibility();
     setActiveTab("downloads");
     return;
   }
@@ -982,6 +1019,8 @@ window.addEventListener("popstate", () => {
   const query = getQueryParam("q");
   const tab = getQueryParam("tab") || "songs";
   const albumId = getQueryParam("album");
+  searchInput.value = query || "";
+  updateClearButtonVisibility();
 
   // Handle album view state
   if (albumId) {
@@ -1016,10 +1055,7 @@ window.addEventListener("popstate", () => {
   }
 
   if (query) {
-    searchInput.value = query;
-    if (tab === "library") {
-      loadLibraryContent(true, query);
-    } else {
+    if (tab !== "library" && tab !== "downloads") {
       performSearch(query);
     }
   } else {

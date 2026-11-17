@@ -84,6 +84,13 @@ function updateQueueUI(jobs) {
     (left, right) => new Date(right.created_at) - new Date(left.created_at),
   );
   queueJobs = jobs;
+  const activeCount = jobs.filter((job) => ["queued", "downloading"].includes(job.status)).length;
+  document.querySelectorAll(".queue-count").forEach((badge) => {
+    badge.textContent = String(activeCount);
+    badge.hidden = activeCount === 0;
+    badge.setAttribute("aria-label", `${activeCount} active downloads`);
+  });
+  document.getElementById("cancel-all-btn").hidden = activeCount === 0;
   const activeJobsByVideo = new Map(jobs.filter((job) => ["queued", "downloading"].includes(job.status)).map((job) => [job.video_id, job]));
   const jobsById = new Map(jobs.map((job) => [job.id, job]));
   // Some reverse proxies keep the SSE connection open but buffer its
@@ -124,7 +131,12 @@ function updateQueueUI(jobs) {
       <div class="downloads-empty">
         <strong>No downloads yet</strong>
         <span>Download a song or album from Explore or Search to see it here.</span>
+        <button type="button" class="empty-action" id="downloads-explore-btn">Find music</button>
       </div>`;
+    document.getElementById("downloads-explore-btn").addEventListener("click", () => {
+      document.getElementById("explore-btn").click();
+      searchInput.focus();
+    });
     return;
   }
 

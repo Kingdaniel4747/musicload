@@ -7,14 +7,17 @@
     <link rel="icon" type="image/png" href="/static/favicon.png" />
     <link rel="apple-touch-icon" href="/static/apple-touch-icon.png" />
     <link rel="manifest" href="/static/manifest.json" />
-    <meta name="theme-color" content="#d60932" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#161617" media="(prefers-color-scheme: dark)" />
     <!-- iOS/iPadOS: use the full screen when launched from the Home Screen. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="Musicload" />
     <link rel="stylesheet" href="/static/style.css?v={{ version }}" />
+    <link rel="stylesheet" href="/static/design.css?v={{ version }}" />
   </head>
   <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
     <div class="container">
       <header>
         <div class="header-content">
@@ -29,7 +32,7 @@
               aria-label="Explore"
               title="Explore"
             >
-              🧭
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5Z"/></svg><span class="nav-label">Explore</span>
             </button>
             <button
               id="library-btn"
@@ -38,7 +41,7 @@
               title="Local Files"
               {% if not is_admin %}hidden{% endif %}
             >
-              📁
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h4v15H4zM10 5h4v15h-4zM16 5l4-1 4 15-4 1Z" transform="translate(-1 0)"/></svg><span class="nav-label">Library</span>
             </button>
             {% if listenbrainz_enabled %}
             <button
@@ -47,7 +50,7 @@
               aria-label="ListenBrainz"
               title="ListenBrainz"
             >
-              LB
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg><span class="nav-label">ListenBrainz</span>
             </button>
             {% endif %}
             <button
@@ -56,7 +59,7 @@
               aria-label="Downloads"
               title="Downloads"
             >
-              ⬇
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg><span class="nav-label">Downloads</span><span class="queue-count" hidden></span>
             </button>
             <div class="utility-controls">
             <button
@@ -92,7 +95,13 @@
         </div>
       </header>
 
-      <form id="search-form" class="search-form">
+      <main id="main-content" tabindex="-1">
+      <div class="page-heading">
+        <p class="eyebrow">YOUR MUSIC, AT HOME</p>
+        <h2 id="page-title">Explore</h2>
+        <p id="page-description">Find your next favorite. Preview it, then add it to your library.</p>
+      </div>
+      <form id="search-form" class="search-form" role="search" aria-label="Search music">
         <select
           id="format-selector"
           class="format-selector-native"
@@ -104,21 +113,11 @@
           <option value="mp3">MP3</option>
           <option value="flac">FLAC</option>
         </select>
-        <button
-          id="format-selector-button"
-          class="format-selector format-selector-button"
-          type="button"
-          aria-label="Choose audio format"
-          aria-haspopup="dialog"
-          aria-controls="format-modal"
-        >
-          <span id="format-selector-label">Opus</span>
-          <span class="format-selector-chevron" aria-hidden="true">⌄</span>
-        </button>
         <div class="search-input-wrapper">
           <input
             type="text"
             id="search-input"
+            aria-label="Search music"
             name="q"
             placeholder="Search music, artists, albums, or paste a URL..."
             autocomplete="off"
@@ -134,8 +133,14 @@
             &times;
           </button>
         </div>
+        <button id="format-selector-button" class="format-selector format-selector-button" type="button"
+          aria-label="Choose audio format" aria-haspopup="dialog" aria-controls="format-modal">
+          <span id="format-selector-label">Opus</span>
+          <span class="format-selector-chevron" aria-hidden="true">⌄</span>
+        </button>
         <button type="submit">Search</button>
       </form>
+      <div id="app-status" class="status" role="status" aria-live="polite" hidden></div>
 
       <div class="search-tabs" id="result-type-toggle" style="display: none">
         <button class="tab-btn active" data-tab="songs">Songs</button>
@@ -146,7 +151,7 @@
         <!-- Queue Section -->
         <div id="queue-section" class="queue-section">
           <div class="queue-header">
-            <h2>Downloads</h2>
+            <h2>Queue</h2>
             <div class="queue-header-actions">
               <button id="cancel-all-btn" class="cancel-all-btn">Cancel All</button>
             </div>
@@ -198,6 +203,7 @@
         <pre id="logs-output" class="logs-output" aria-live="off"></pre>
       </div>
       {% endif %}
+      </main>
     </div>
 
     <div id="mini-player" class="mini-player" hidden>
@@ -212,18 +218,18 @@
 
     <nav class="mobile-nav{% if listenbrainz_enabled and is_admin %} mobile-nav-four{% elif listenbrainz_enabled or is_admin %} mobile-nav-three{% else %} mobile-nav-two{% endif %}" aria-label="Main navigation">
       <button class="mobile-nav-btn active" data-mobile-tab="explore" aria-label="Explore">
-        <span class="mobile-nav-icon">⌕</span><span>Explore</span>
+        <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m16 8-2.5 5.5L8 16l2.5-5.5Z"/></svg></span><span>Explore</span>
       </button>
       <button class="mobile-nav-btn" data-mobile-tab="library" aria-label="Library" {% if not is_admin %}hidden{% endif %}>
-        <span class="mobile-nav-icon">▣</span><span>Library</span>
+        <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h5v15H4zM13 5l5-1 4 15-5 1Z"/></svg></span><span>Library</span>
       </button>
       {% if listenbrainz_enabled %}
       <button class="mobile-nav-btn" data-mobile-tab="listenbrainz" aria-label="ListenBrainz">
-        <span class="mobile-nav-icon">LB</span><span>ListenBrainz</span>
+        <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10v4M8 6v12M12 3v18M16 6v12M20 10v4"/></svg></span><span>ListenBrainz</span>
       </button>
       {% endif %}
       <button class="mobile-nav-btn" data-mobile-tab="downloads" aria-label="Downloads">
-        <span class="mobile-nav-icon">↓</span><span>Downloads</span>
+        <span class="mobile-nav-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M5 16v4h14v-4"/></svg><span class="queue-count" hidden></span></span><span>Downloads</span>
       </button>
     </nav>
 
@@ -233,7 +239,7 @@
         <div class="modal-header">
           <div>
             <h2 id="settings-title">Settings</h2>
-            <p>Application settings live here. Compose only keeps Docker ports and volumes.</p>
+            <p>Manage downloads, your library, and connected services.</p>
           </div>
           <button id="settings-close" class="modal-close" aria-label="Close settings">&times;</button>
         </div>

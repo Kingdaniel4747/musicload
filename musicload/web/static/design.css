@@ -1,0 +1,251 @@
+/* Application design system. Loaded after the legacy component rules. */
+:root {
+  color-scheme: light;
+  --bg-primary: #fff;
+  --bg-secondary: #f5f5f7;
+  --bg-tertiary: #eaeaec;
+  --surface-raised: #fff;
+  --text-primary: #1d1d1f;
+  --text-secondary: #626268;
+  --text-tertiary: #74747b;
+  --accent-primary: #d60932;
+  --accent-hover: #b8072a;
+  --accent-soft: #fbe8ed;
+  --border-color: #dedee3;
+  --border-hover: #b6b6bf;
+  --error-bg: #fff0f1;
+  --error-text: #a50d2a;
+  --sidebar-bg: #f5f5f7;
+  --glass-bg: #fffffff0;
+  --success-bg: #e7f4ec;
+  --success-text: #23663e;
+  --content-width: 1120px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --bg-primary: #161617;
+    --bg-secondary: #222224;
+    --bg-tertiary: #303034;
+    --surface-raised: #29292c;
+    --text-primary: #f5f5f7;
+    --text-secondary: #b6b6bd;
+    --text-tertiary: #a1a1aa;
+    --accent-primary: #ff375f;
+    --accent-hover: #ff6482;
+    --accent-soft: #392129;
+    --border-color: #38383c;
+    --border-hover: #62626b;
+    --error-bg: #3b2028;
+    --error-text: #ffabbc;
+    --sidebar-bg: #1c1c1e;
+    --glass-bg: #222224f0;
+    --success-bg: #20392a;
+    --success-text: #a2e3b8;
+  }
+}
+
+body {
+  padding-left: 232px;
+  background: var(--bg-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  line-height: 1.5;
+}
+.container { padding: 0 clamp(24px, 4vw, 64px) 64px; }
+main { max-width: var(--content-width); margin: auto; }
+main:focus { outline: none; }
+.skip-link {
+  position: fixed; top: 8px; left: 248px; z-index: 1000;
+  padding: 10px 18px; border-radius: 8px;
+  background: var(--text-primary); color: var(--bg-primary);
+  transform: translateY(-160%);
+}
+.skip-link:focus { transform: none; }
+header { width: 232px; padding: 32px 16px; background: var(--sidebar-bg); }
+.header-title { padding: 0 10px 38px; }
+header h1 { flex-wrap: wrap; gap: 9px; font-size: 19px; letter-spacing: -.6px; }
+header h1 .brand-mark { width: 30px; height: 30px; }
+header h1 .version { border: 0; padding: 0; margin: 0 0 0 39px; font-size: 10px; }
+.header-controls { gap: 5px; }
+.icon-btn { border-radius: 9px; }
+.header-controls > .icon-btn {
+  min-height: 46px; height: auto; padding: 11px 13px;
+  font-size: 14px !important; color: var(--text-secondary);
+}
+.header-controls > .icon-btn::after { content: none !important; }
+.header-controls > .icon-btn svg { width: 21px; height: 21px; flex: none; color: var(--accent-primary); }
+.header-controls > .icon-btn.active {
+  background: var(--accent-soft) !important; color: var(--accent-primary) !important;
+}
+.icon-btn:hover, .utility-controls .icon-btn:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+.nav-label { font-size: 14px; font-weight: 600; }
+.utility-controls {
+  position: static; flex-wrap: wrap; gap: 7px;
+  margin-top: 32px; padding: 20px 8px 0; border-top: 1px solid var(--border-color);
+}
+.utility-controls .icon-btn { border: 0; border-radius: 9px; background: transparent; }
+.page-heading { padding: 48px 0 26px; }
+.eyebrow { margin-bottom: 8px; font-size: 10px; font-weight: 700; letter-spacing: 1.8px; color: var(--text-secondary); }
+.page-heading h2 { margin: 0 0 9px; font-size: clamp(30px, 3.4vw, 42px); font-weight: 750; letter-spacing: -1.5px; }
+#page-description { max-width: 620px; color: var(--text-secondary); font-size: 15px; line-height: 1.6; }
+.search-form {
+  width: 100%; margin: 0 0 32px; padding: 6px;
+  border-radius: 13px; background: var(--bg-secondary); box-shadow: none;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px;
+}
+.search-input-wrapper { grid-column: 1; grid-row: 1; }
+.search-form .format-selector-button {
+  grid-column: 2; grid-row: 1; min-height: 44px; height: 44px;
+  min-width: 85px; padding: 0 12px; border: 0; border-left: 1px solid var(--border-color);
+  border-radius: 0; background: transparent; color: var(--text-secondary); font-size: 13px;
+}
+.search-form .format-selector-button:hover { background: var(--bg-tertiary); }
+.search-form input { min-height: 44px; padding: 10px 46px 10px 12px !important; font-size: 15px; }
+.search-form button[type="submit"] {
+  grid-column: 3; grid-row: 1; min-height: 44px; min-width: 88px; border-radius: 8px;
+  padding: 0 18px; font-size: 13px; font-weight: 600;
+}
+.search-form:focus-within { border-color: var(--accent-primary); box-shadow: 0 0 0 3px var(--accent-soft); }
+.search-form.local-search { grid-template-columns: minmax(0, 1fr) auto; }
+.search-form.local-search button[type="submit"] { grid-column: 2; }
+.search-form .format-selector-button[hidden] { display: none !important; }
+.search-form .search-clear-btn { width: 44px; height: 44px; right: 0 !important; min-height: 44px; }
+.search-tabs { width: fit-content; margin: 0 0 24px; padding: 4px; gap: 3px; border: 0; border-radius: 10px; background: var(--bg-secondary); }
+.tab-btn, .log-source-tab { min-height: 44px; border-radius: 8px; }
+.tab-btn.active, .tab-btn:hover, .log-source-tab.active { color: var(--text-primary); background: var(--bg-tertiary); }
+.tab-btn { min-height: 40px; margin: 0; padding: 8px 24px; border: 0; border-radius: 7px; background: transparent; color: var(--text-secondary); font-size: 13px; }
+.tab-btn.active { background: var(--surface-raised); color: var(--text-primary); box-shadow: 0 1px 4px #0001; }
+.explore-section-header, .queue-header, .library-header { align-items: center; gap: 16px; margin-bottom: 18px; }
+.explore-section-header h2, .explore-section h2, .queue-header h2, .library-header h2 { color: var(--text-primary); font-size: 22px; letter-spacing: -.6px; }
+.explore-charts-section, .explore-new-releases-section, .mood-section { margin-bottom: 42px; }
+.country-selector, .pagination-btn, .library-explore-btn, .download-all-btn {
+  min-height: 40px; border-radius: 8px; box-shadow: none;
+}
+.country-selector { background: var(--bg-secondary); color: var(--text-primary); border-color: var(--border-color); }
+.chart-tracks-list, .results { gap: 0; }
+.track {
+  min-height: 84px; padding: 12px 8px; gap: 16px;
+  background: transparent; border: 0; border-bottom: 1px solid var(--border-color); border-radius: 0; box-shadow: none;
+}
+.track:hover { background: var(--bg-secondary); transform: none; box-shadow: none; }
+.track-cover { width: 56px; height: 56px; border-radius: 7px; }
+.track-title { color: var(--text-primary); font-size: 15px; font-weight: 600; }
+.track-artist { color: var(--text-secondary); font-size: 13px; }
+.track-meta { color: var(--text-tertiary); font-size: 11px; }
+.track-actions { gap: 10px; }
+.play-btn, .download-btn { box-shadow: none; }
+.play-btn[data-playback-state] { width: 44px; min-width: 44px; height: 44px; min-height: 44px; color: var(--accent-primary); background: var(--accent-soft); border: 0; }
+.download-btn { min-height: 44px; padding: 0 16px; border-radius: 8px; background: var(--accent-primary); color: #fff; font-size: 12px; font-weight: 600; }
+.btn, .view-album-btn, .library-explore-btn, .pagination-btn, .download-file-btn,
+.new-release-actions button, .mood-playlist-actions button { color: var(--text-primary); background: var(--bg-secondary); min-height: 44px; }
+.download-all-btn, .download-album-btn, .btn-primary, .mood-playlist-actions .download-playlist-btn { color: #fff; background: var(--accent-primary); min-height: 44px; }
+.download-btn:hover:not(:disabled), .download-all-btn:hover, .download-album-btn:hover:not(:disabled), .btn-primary:hover { color: #fff; background: var(--accent-hover); }
+.view-album-btn:hover:not(:disabled), .library-explore-btn:hover, .pagination-btn:hover,
+.new-release-actions button:hover, .mood-playlist-actions button:hover { color: var(--text-primary); background: var(--bg-tertiary); }
+.cancel-all-btn, .remove-btn, .clear-job-btn, .cancel-job-btn, .library-delete-btn, .btn-danger { color: var(--error-text); background: transparent; border-color: var(--border-color); min-height: 44px; }
+.cancel-all-btn:hover, .remove-btn:hover:not(:disabled), .clear-job-btn:hover, .cancel-job-btn:hover, .library-delete-btn:hover:not(:disabled), .btn-danger:hover { color: var(--error-text); background: var(--error-bg); }
+.download-btn.inline-download-progress, .progress-action-btn { background: var(--accent-soft); color: var(--text-primary); }
+.button-progress-fill { background: color-mix(in srgb, var(--accent-primary) 25%, transparent); }
+.track.is-playing { background: var(--accent-soft) !important; border-color: var(--border-color) !important; box-shadow: inset 3px 0 var(--accent-primary) !important; transform: none; }
+.play-btn[data-playback-state="pause"]:focus-visible { outline: 2px solid var(--text-primary) !important; outline-offset: 3px !important; }
+.album-card, .new-release-card, .mood-playlist-card { background: transparent; border: 0; border-radius: 10px; overflow: hidden; box-shadow: none; }
+.album-card:hover, .new-release-card:hover, .mood-playlist-card:hover { transform: none; background: var(--bg-secondary); box-shadow: none; }
+.album-cover, .new-release-cover, .mood-playlist-thumb { border-radius: 10px; }
+.album-info, .new-release-info, .mood-playlist-info { padding: 12px 4px 6px; }
+.album-title, .new-release-title, .mood-playlist-title { color: var(--text-primary); font-size: 14px; }
+.album-actions, .new-release-actions, .mood-playlist-actions { padding: 8px 4px 12px; }
+.new-release-actions button, .mood-playlist-actions button { min-height: 44px; background: var(--bg-secondary); color: var(--accent-primary); border: 1px solid var(--border-color); border-radius: 8px; }
+.mood-category-card { min-height: 64px; border-radius: 10px; box-shadow: none; }
+.downloads-empty, .duplicates-empty, .explore-loading, .explore-error {
+  padding: 48px 24px; border: 1px solid var(--border-color); border-radius: 14px;
+  background: var(--bg-secondary); color: var(--text-secondary); text-align: center;
+}
+.downloads-empty strong { color: var(--text-primary); }
+.empty-action { display: inline-flex; align-items: center; justify-content: center; margin-top: 18px; min-height: 44px; padding: 0 20px; border: 0; border-radius: 9px; background: var(--accent-primary); color: white; font: inherit; cursor: pointer; }
+.queue-count { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 5px; margin-left: auto; border-radius: 11px; font-size: 11px; font-weight: 700; background: var(--accent-primary); color: #fff; }
+#downloads-btn.download-active { background: var(--accent-soft); color: var(--accent-primary); }
+.job-card { background: var(--bg-secondary); border-color: var(--border-color); box-shadow: none; }
+.job-status.status-completed, .download-btn.already-downloaded:disabled { background: var(--success-bg); color: var(--success-text); border-color: transparent; }
+.job-status.status-queued, .job-status.status-downloading { background: var(--accent-soft); color: var(--accent-primary); }
+.modal { background: #0006; backdrop-filter: blur(8px); }
+.modal-content { background: var(--bg-primary); border-radius: 20px; box-shadow: 0 24px 80px #0003; }
+.modal-body input, .modal-body select, .modal-body textarea { background: var(--bg-secondary); color: var(--text-primary); }
+.format-option { background: var(--bg-secondary); }
+.format-option.selected { background: var(--accent-soft); }
+.settings-form-actions { background: var(--bg-primary); }
+.settings-message.success { color: var(--success-text); }
+.status:not([hidden]) { display: block; padding: 14px 18px; margin: 0 0 24px; border: 1px solid var(--border-color); border-radius: 10px; background: var(--bg-secondary); color: var(--text-primary); }
+.status.error { color: var(--error-text); background: var(--error-bg); border-color: var(--error-text); }
+.status:empty { display: none; }
+.mini-player { background: var(--glass-bg); color: var(--text-primary); border-color: var(--border-color); border-radius: 16px; box-shadow: 0 8px 36px #0002; backdrop-filter: blur(20px); }
+.mini-player-stop { color: var(--text-secondary); min-height: 44px; }
+.logs-output { color: var(--text-primary); background: var(--bg-secondary); }
+body.login-page { padding: 24px; background: var(--bg-secondary); }
+.login-card { background: var(--bg-primary); border: 1px solid var(--border-color); box-shadow: 0 12px 48px #0000000a; padding: 36px; }
+.login-form input { min-height: 48px; background: var(--bg-secondary); color: var(--text-primary); }
+.login-form button { min-height: 48px; border-radius: 10px; }
+
+@media (max-width: 1000px) and (min-width: 721px) {
+  body { padding-left: 200px; }
+  header { width: 200px; padding-inline: 12px; }
+  .container { padding-inline: 24px; }
+  .nav-label { font-size: 13px; }
+}
+@media (max-width: 720px) {
+  body { padding: 0 0 calc(84px + env(safe-area-inset-bottom)); }
+  .container { padding: 0 20px 32px; }
+  header { width: auto; margin: 0 -20px; padding: max(12px, env(safe-area-inset-top)) 20px 12px; background: var(--glass-bg); backdrop-filter: blur(20px); }
+  header h1 { font-size: 17px; flex-wrap: nowrap; }
+  .header-title { padding: 0; }
+  .utility-controls { border: 0; padding: 0; margin: 0; flex-wrap: nowrap; gap: 2px; }
+  .utility-controls .icon-btn { min-width: 40px; width: 40px; min-height: 44px; height: 44px; }
+  .page-heading { padding: 28px 0 22px; }
+  .eyebrow { font-size: 9px; letter-spacing: 1.4px; }
+  .page-heading h2 { font-size: 34px; letter-spacing: -1px; }
+  #page-description { font-size: 14px; }
+  .search-form { margin-bottom: 28px; grid-template-columns: minmax(0, 1fr) auto auto; border-radius: 12px; }
+  .search-form input { font-size: 16px; }
+  .search-form .format-selector-button { width: auto; min-width: 64px; padding: 0 8px; font-size: 11px; }
+  .search-form button[type="submit"] { width: 44px; min-width: 44px; min-height: 44px; padding: 0; font-size: 0; }
+  .search-form button[type="submit"]::after { content: "→"; transform: none; font-weight: 500; }
+  .explore-section-header, .queue-header, .library-header { flex-direction: row; align-items: center; flex-wrap: wrap; }
+  .explore-section-header h2, .explore-section h2, .queue-header h2 { font-size: 20px; }
+  .explore-section-actions { flex-wrap: wrap; gap: 8px; }
+  .track { gap: 8px; padding: 12px 0; min-height: 80px; border-radius: 0; }
+  .track-main { gap: 10px; }
+  .track-cover { width: 48px; height: 48px; }
+  .track-title { font-size: 14px; }
+  .track-artist { font-size: 12px; }
+  .track-actions { gap: 6px; }
+  .track-actions .play-btn[data-playback-state] { display: inline-grid; width: 44px; min-width: 44px; }
+  .download-btn { min-height: 44px; padding: 0 10px; font-size: 11px; }
+  .mobile-nav { background: var(--glass-bg); backdrop-filter: blur(20px); padding-top: 7px; }
+  .mobile-nav-btn { min-height: 56px; color: var(--text-secondary); font-size: 10px; gap: 4px; }
+  .mobile-nav-btn.active { background: transparent; color: var(--accent-primary); }
+  .mobile-nav-icon { position: relative; height: 25px; display: inline-flex; }
+  .mobile-nav-icon svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+  .mobile-nav-icon .queue-count { position: absolute; top: -6px; left: 17px; min-width: 17px; height: 17px; font-size: 9px; }
+  .skip-link { left: 16px; }
+  .modal { padding: 10px; }
+  .modal-content { max-height: calc(100dvh - 20px); }
+  .mini-player { bottom: calc(84px + env(safe-area-inset-bottom)); background: var(--glass-bg) !important; box-shadow: 0 8px 36px #0002 !important; }
+  .mini-player .mini-player-toggle { color: var(--accent-primary) !important; }
+}
+@media (max-width: 390px) {
+  .container { padding-inline: 14px; }
+  header { margin-inline: -14px; padding-inline: 14px; }
+  .track { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+  .track-cover { width: 40px; height: 40px; }
+  .track-main { gap: 8px; }
+  .track-actions { gap: 2px; }
+  .download-btn { padding-inline: 8px; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  header, .mini-player, .mobile-nav { background: var(--bg-primary); backdrop-filter: none; }
+  .modal { backdrop-filter: none; }
+}
+@media (prefers-contrast: more) {
+  :root { --text-secondary: var(--text-primary); --text-tertiary: var(--text-primary); --border-color: var(--text-primary); }
+}
